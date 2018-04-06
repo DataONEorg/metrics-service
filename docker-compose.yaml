@@ -5,11 +5,7 @@ networks:
     driver: bridge
 
 volumes:
-  pgdata:
-    driver: local
-  webdata:
-    driver: local
-  lecerts:
+  metricsdata:
     driver: local
 
 services:
