@@ -1,0 +1,28 @@
+version: '2'
+
+networks:
+  metricsnet:
+    driver: bridge
+
+volumes:
+  pgdata:
+    driver: local
+  webdata:
+    driver: local
+  lecerts:
+    driver: local
+
+services:
+  metricsdb:
+    hostname: metricsdb
+    image: postgres
+    networks:
+      - metricsnet
+    ports:
+      - '5432:5432'
+    volumes:
+      - metricsdata:/metricsdata
+    env_file:
+      - metrics.env
+    environment:
+      PGDATA: '/metricsdata'
