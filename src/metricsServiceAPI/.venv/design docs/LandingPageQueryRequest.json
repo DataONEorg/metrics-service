@@ -1,0 +1,21 @@
+{
+	"metrics": [
+      "Citations",
+      "Unique_Dataset_Requests",
+      "Total_Dataset_Requests",
+      "Total_Dataset_Investigations",
+      "Unique_Dataset_Investigations"
+    ],
+    "filterBy": [
+      {
+        "filterType": "dataset",
+        "values": [
+          "Dataset002"
+        ],
+        "interpretAs": "list"
+      }
+    ],
+    "groupBy": [
+      "dataset"
+    ]
+}
