@@ -1,7 +1,7 @@
 Metrics Service Class Diagram
 ==============================
 
-\- The Falcon `app.py` is where the Falcon API creates a WSGI application and the Gunicorn server runs this application.
+- The Falcon `app.py` is where the Falcon API creates a WSGI application and the Gunicorn server runs this application.
 
 - Separate resources are created from the classes `GetMetrics` and `PostMetricsFilters` which are eventually mapped to
 the end-points into this `app.py`.
