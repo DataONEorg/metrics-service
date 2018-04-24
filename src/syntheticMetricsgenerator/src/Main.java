@@ -13,7 +13,7 @@ public class Main {
             // the run insertion function to populate the database table
 
             // the method runs the queries from the SQL file.
-            dbHandler.runSQL(new File("SQLqueries/indexing.sql"));
+            dbHandler.runSQL(new File("../SQL/indexing.sql"));
 
         }
         catch (Exception e) {
