@@ -2,7 +2,7 @@
 Metrics Handler module
 """
 
-from .applicaitondao import ApplicationDAO
+from .metricsDAO import ApplicationDAO
 
 class MetricsHandler:
     """
