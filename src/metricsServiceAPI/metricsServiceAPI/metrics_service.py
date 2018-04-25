@@ -10,7 +10,7 @@ We create unique resource and map to its endpoint.
 
 import falcon
 
-from .getmetrics import GetMetrics
+from .getMetrics import GetMetrics
 from .postmetricsfilter import PostMetricsFilters
 
 api = application = falcon.API() # pylint: disable=invalid-name
