@@ -1,23 +1,19 @@
 Metrics Service Class Diagram
 ==============================
 
-- The Falcon `app.py` is where the Falcon API creates a WSGI application and the Gunicorn server runs this application.
+- The Falcon `metrics_service.py` is where the Falcon API creates a WSGI application and the Gunicorn server runs this application.
 
-- Separate resources are created from the classes `GetMetrics` and `PostMetricsFilters` which are eventually mapped to
-the end-points into this `app.py`.
+- Resource object is created from the class `` which is eventually mapped to the end-points into the `metrics_service.py`.
 
-- The HTTP requests then are redirected to the corresponding classes based on the mappings available on the `app.py`.
-
-- Both these classes load the JSON `MetricsRequest` object from the HTTP requests and pass it on to the MetricsHandler
-class for further processing.
+- The JSON `MetricsRequest` object from the HTTP requests and pass it on to the `MetricsHandler` class for further processing.
 
 - The `MetricsHandler` class parses the `MetricsRequest` object and based on the filtering properties calls the
 appropriate method of the `ApplicationDAO` class.
 
-- The `ApplciationDAO` class takes the connection object from the `DBConnectivity` class and creates a cursor that can
+- The `MetricsDAO` class takes the connection object from the `DBConnectivity` class and creates a cursor that can
 perform the `DBMS CRUD` operations. This class has methods that would query the Database tables / Materialized views.
 
-- The ApplicationDAO class retrieves the queries results from the Database and returns the results to the `MetricsHandler`
+- The `MetricsDAO` class retrieves the queries results from the Database and returns the results to the `MetricsHandler`
 class. The `MetricsHandler` class forms a `MetricsResponse` object which is sent back to the client as HTTP Response.
 
 
@@ -38,7 +34,7 @@ Class Diagram
         + get_connection()
     }
 
-    class ApplicationDAO {
+    class MetricsDAO {
         + connection
         + cursor
         + results
@@ -47,6 +43,7 @@ Class Diagram
         + get_user_profile_charts()
         + get_search_metrics()
         + get_metrics()
+        + upsert_metrics()
     }
 
     class MetricsHandler {
@@ -55,28 +52,43 @@ Class Diagram
         + processRequest()
     }
 
-    class GetMetrics {
+    class MetricsReader {
         + on_get()
-    }
-
-    class PostMetricsFilters {
         + on_post()
+    }
+    
+    class MetricsHarvester {
+        + query_ES()
+        + write_sessions()
+    }
+    
+    class SessionManager {
+        + generate_session_ids()
+    }
+    
+    class ReportHandler {
+        + query_SOLR()
+        + generate_reports()
+        + send_reports()
     }
 
     ' Define the interactions
-    Client -down-> Falcon_app :"HTTP_Request"
-    Falcon_app -up-> Client: "HTTP_Response"
-    Falcon_app -down-> GetMetrics: "GET_Request"
-    GetMetrics -up-> Falcon_app: "GET_Response"
-    Falcon_app -down-> PostMetricsFilters: "POST_Request"
-    PostMetricsFilters -up-> Falcon_app : "POST_Response"
-    GetMetrics -down-> MetricsHandler: "Process_Metrics_Request"
-    PostMetricsFilters -down-> MetricsHandler: "Process_Metrics_Request"
-    MetricsHandler -up-> GetMetrics: "Reponse"
-    MetricsHandler -up-> PostMetricsFilters: "Response"
-    MetricsHandler -left-> ApplicationDAO: "Query"
-    ApplicationDAO -right-> MetricsHandler: "Results"
-    DBConnectivity -right-> ApplicationDAO: "Connection"
+    Client -down-> metrics_service :"HTTP_Request"
+    metrics_service -up-> Client: "HTTP_Response"
+    metrics_service -down-> MetricsReader: "GET_Request / POST_Request"
+    MetricsReader -up-> metrics_service: ""GET_Request / POST_Request"
+    metrics_service -down-> MetricsHarvester: "Update"
+    MetricsReader -down-> MetricsHandler: "Process_Metrics_Request"
+    MetricsHandler -up-> MetricsReader: "Response"
+    MetricsHandler -down-> MetricsDAO: "Query"
+    MetricsDAO -up-> MetricsHandler: "Results"
+    DBConnectivity -right-> MetricsDAO: "Connection"
+    MetricsHarvester -down-> MetricsDAO: "Create / Read / Update"
+    MetricsDAO -up-> MetricsHarvester: "Results"
+    SessionManager -left-> MetricsHarvester: "Session IDs"
+    MetricsHarvester -left-> ReportHandler: "Records"
+    ReportHandler -up-> Hub : "Reports"
+
 
 
   @enduml
