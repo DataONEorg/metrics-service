@@ -10,20 +10,15 @@ We create unique resource and map to its endpoint.
 
 import falcon
 
-from .getMetrics import GetMetrics
-from .postmetricsfilter import PostMetricsFilters
+from .MetricsReader import MetricsReader
 
 api = application = falcon.API() # pylint: disable=invalid-name
 
 # Creating a unique GET resource from the GetMetrics class
-getmetricsrequest = GetMetrics() # pylint: disable=invalid-name
+metrics_Reader_resource = MetricsReader() # pylint: disable=invalid-name
 
 # Mapping the HTTP GET endpoint with its unique resource
-api.add_route('/getMetrics', getmetricsrequest)
-
-
-# Creating a unique POST resource from the PostMetricsFilters class
-postmetricsrequest = PostMetricsFilters() # pylint: disable=invalid-name
+api.add_route('/metrics', metrics_Reader_resource)
 
 # Mapping the HTTP POST endpoint with its unique resource
-api.add_route('/metrics/filter', postmetricsrequest)
+api.add_route('/metrics/filter', metrics_Reader_resource)
