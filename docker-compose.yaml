@@ -22,3 +22,5 @@ services:
       - metrics.env
     environment:
       PGDATA: '/metricsdata'
+    volumes:
+      - ./src/sql:/docker-entrypoint-initdb.d  
