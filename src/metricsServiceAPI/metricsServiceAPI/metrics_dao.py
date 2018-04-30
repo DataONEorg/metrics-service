@@ -1,9 +1,9 @@
 """
 Application Data Access Object module
 """
-from .dbconnectivity import DBConnectivity
+from .db_connectivity import DBConnectivity
 
-class ApplicationDAO:
+class MetricsDAO:
     """
     This class contains various methods that query the
     database tables and the database materialized views.
@@ -24,8 +24,9 @@ class ApplicationDAO:
         results = {}
 
         # executing the query
-        self.cursor.execute("select * from landingpage3 where dataset_id in (\'" + "\',\'".join(request) + "\') "\
-                                + "group by month, year, metrics_name, sum, dataset_id order by month, year;")
+        self.cursor.execute("select * from landingpage3 where dataset_id in (\'" \
+                            + "\',\'".join(request) + "\') "\
+                            + "group by month, year, metrics_name, sum, dataset_id order by month, year;")
 
         # retrieving the results
         res = self.cursor.fetchall()
@@ -51,4 +52,3 @@ class ApplicationDAO:
 
 
         return results
-
