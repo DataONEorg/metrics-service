@@ -12,7 +12,7 @@ CREATE TABLE db_version (
   status          INT8,             -- status of the version, 1 if its the current version
   CONSTRAINT db_version_pk PRIMARY KEY (db_version_id)
 );
-INSERT into db_version (version, status) VALUES ('0.0.1', 1);
+INSERT into db_version (version, status) VALUES ('0.0.2', 1);
 CREATE TABLE metrics(
     serial_no SERIAL,           -- the identifier for the record
     dataset_id TEXT,           -- the identifier for the dataset
@@ -27,3 +27,10 @@ CREATE TABLE metrics(
     metrics_name TEXT,           -- metrics name for given dataset
     metrics_value INTEGER           -- count of metric event for that dataset
 );
+/*
+ * db_metadata -- table to store arbitrary key, value pairs for application state and configuration
+ */
+CREATE TABLE db_metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT
+)

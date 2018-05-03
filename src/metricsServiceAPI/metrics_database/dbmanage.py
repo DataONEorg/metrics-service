@@ -14,8 +14,6 @@ from pprint import pprint
 from . import metricsdatabase
 
 
-
-
 def dbcheck(args):
   #Get a logger with the current method name
   _L = logging.getLogger(sys._getframe().f_code.co_name + "()")
@@ -53,10 +51,32 @@ def dbInitialize(args):
   return 0
 
 
+def dbSetProperty(args):
+  #Get a logger with the current method name
+  _L = logging.getLogger(sys._getframe().f_code.co_name + "()")
+  #get metrics database instance
+  database = metricsdatabase.MetricsDatabase(args.config)
+  try:
+    database.connect()
+  except psycopg2.OperationalError as e:
+    #Can't connect to database
+    _L.error(e)
+    print("Database not available. Does it exist? See README.rst for instructions.")
+  if args.metaval is None:
+    database.deleteMetadataValue(args.metakey)
+    print("Metadata property at {} deleted.".format(args.metakey))
+    return 0
+  database.setMetadataValue(args.metakey, args.metaval)
+  v = database.getMetadataValue(args.metakey)
+  print("Key {} set to {}".format(args.metakey, v))
+  return 0
+
+
 def main():
   commands = {
     "check":dbcheck,
     "initialize":dbInitialize,
+    "setproperty": dbSetProperty,
   }
   parser = argparse.ArgumentParser(description=__doc__,
     formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -70,6 +90,12 @@ def main():
   parser.add_argument("--sqlinit",
                       default=None,
                       help="Glob patttern for initialization SQL files.")
+  parser.add_argument("-k", "--metakey",
+                      default=None,
+                      help="Key for get/set metadata property.")
+  parser.add_argument("-v", "--metaval",
+                      default=None,
+                      help="Value for set metadata property.")
   parser.add_argument('command',
                       nargs='?',
                       default="check",

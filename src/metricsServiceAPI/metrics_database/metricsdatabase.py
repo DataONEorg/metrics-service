@@ -1,9 +1,12 @@
-import sys
-import os
-import argparse
 import logging
 import psycopg2
 import configparser
+import collections
+try:
+  from cPickle import dumps, loads, HIGHEST_PROTOCOL as PICKLE_PROTOCOL
+except ImportError:
+  from pickle import dumps, loads, HIGHEST_PROTOCOL as PICKLE_PROTOCOL
+
 
 DEFAULT_CONFIG_FILE="/etc/dataone/metrics/database.ini"
 CONFIG_DATABASE_SECTION = "database"
@@ -47,6 +50,15 @@ class MetricsDatabase(object):
     return self.conn.cursor()
 
 
+  def _iterRow(self, cursor, num_rows=100):
+    while True:
+      rows = cursor.fetchmany(num_rows)
+      if not rows:
+        break
+      for row in rows:
+        yield row
+
+
   def getSingleValue(self, csr, sql):
     self._L.debug("getSingleValue: %s", sql)
     csr.execute(sql)
@@ -65,7 +77,7 @@ class MetricsDatabase(object):
 
 
   def summaryReport(self):
-    res = {}
+    res = collections.OrderedDict()
     operations = {
       "version":"SELECT version FROM db_version;",
       "rows": "SELECT count(*) FROM metrics;",
@@ -80,7 +92,50 @@ class MetricsDatabase(object):
     with self.getCursor() as csr:
       for key,value in iter(operations.items()):
         res[key] = self.getSingleValue(csr, value)
+    res["metadata"] = self.getMetadata()
     return res
 
 
+  def setMetadataValue(self, k, v):
+    pickled = dumps(v, protocol=PICKLE_PROTOCOL)
+    sql = "INSERT INTO db_metadata (key, value) VALUES (%s, %s) ON CONFLICT (key) DO "\
+          "UPDATE SET value=excluded.value"
+    csr = self.getCursor()
+    csr.execute(sql, (k, psycopg2.Binary(pickled)))
+    self.conn.commit()
+
+
+  def getMetadataValue(self, k, default=None):
+    csr = self.getCursor()
+    sql = "SELECT value FROM db_metadata WHERE key=%s"
+    try:
+      csr.execute(sql, (k,))
+      pickled = csr.fetchone()[0]
+      self._L.debug("Pickled = %s", pickled)
+      v = loads(pickled)
+      return v
+    except Exception as e:
+      self._L.warning("Returning default value for %s", k)
+    return default
+
+
+  def deleteMetadataValue(self, k):
+    self._L.info("Deleting metadata key %s", k)
+    csr = self.getCursor()
+    sql = "DELETE FROM db_metadata WHERE key=%s"
+    csr.execute(sql, (k,))
+    self.conn.commit()
+
+
+  def getMetadata(self):
+    res = collections.OrderedDict()
+    csr = self.getCursor()
+    sql = "SELECT key, value FROM db_metadata;"
+    csr.execute(sql)
+    for row in self._iterRow(csr, num_rows=10):
+      k = row[0]
+      pickled = row[1]
+      v = loads(pickled)
+      res[k] = v
+    return res
 
