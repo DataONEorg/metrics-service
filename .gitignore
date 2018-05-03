@@ -26,3 +26,6 @@ hs_err_pid*
 src/.DS_Store
 
 src/metricsServiceAPI/.idea/workspace.xml
+
+#Pycharm workspace files
+.idea
