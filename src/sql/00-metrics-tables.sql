@@ -17,7 +17,7 @@ CREATE TABLE metrics(
     serial_no SERIAL,           -- the identifier for the record
     dataset_id TEXT,           -- the identifier for the dataset
     user_id TEXT,           -- the identifier for the user
-    repository TEXT,           -- the identifier for the repository
+    repository TEXT,           -- the identifier for the repository (member node)
     funding_number TEXT,           -- the funding number under which the dataset was published
     award_number TEXT,           -- the award number under which the dataset was published
     day INTEGER,           -- day of the occurence of the event
