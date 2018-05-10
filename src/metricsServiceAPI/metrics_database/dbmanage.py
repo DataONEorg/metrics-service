@@ -11,6 +11,7 @@ import logging
 import psycopg2
 import glob
 from pprint import pprint
+import metrics_common
 from . import metricsdatabase
 
 
@@ -85,7 +86,7 @@ def main():
                       default=0,
                       help='Set logging level, multiples for more detailed.')
   parser.add_argument("-c", "--config",
-                      default=metricsdatabase.DEFAULT_CONFIG_FILE,
+                      default=metrics_common.DEFAULT_CONFIG_FILE,
                       help="Configuration file.")
   parser.add_argument("--sqlinit",
                       default=None,

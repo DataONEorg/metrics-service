@@ -6,9 +6,9 @@ try:
   from cPickle import dumps, loads, HIGHEST_PROTOCOL as PICKLE_PROTOCOL
 except ImportError:
   from pickle import dumps, loads, HIGHEST_PROTOCOL as PICKLE_PROTOCOL
+import metrics_common
 
 
-DEFAULT_CONFIG_FILE="/etc/dataone/metrics/database.ini"
 CONFIG_DATABASE_SECTION = "database"
 DEFAULT_DB_CONFIG = {
   "host":"localhost",
