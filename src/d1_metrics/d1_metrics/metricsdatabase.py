@@ -20,6 +20,9 @@ DEFAULT_DB_CONFIG = {
 
 
 class MetricsDatabase(object):
+  '''
+  Implements a wrapper and convenience methods for accessing the metrics postgresql database.
+  '''
 
   def __init__(self, config_file=None):
     self._L = logging.getLogger(self.__class__.__name__)
@@ -30,6 +33,15 @@ class MetricsDatabase(object):
 
 
   def loadConfig(self, config_file):
+    '''
+    Load configuration parameters
+
+    Args:
+      config_file: Path to an INI format configuration file.
+
+    Returns:
+      dictionary of configuration values
+    '''
     config = configparser.ConfigParser()
     self._L.debug("Loading configuration from %s", config_file)
     config.read(config_file)
@@ -39,6 +51,15 @@ class MetricsDatabase(object):
 
 
   def connect(self, force_new=False):
+    '''
+    Establish a connection to the postgres database
+
+    Args:
+      force_new: If true, force a new connection to the database.
+
+    Returns:
+      None
+    '''
     if not self.conn is None and not force_new:
       self._L.info("Connection to database already established.")
       return
@@ -47,10 +68,27 @@ class MetricsDatabase(object):
 
 
   def getCursor(self):
+    '''
+    Retrieve a cursor for the postgres database, opening connection if necessary.
+
+    Returns:
+      cursor to the database
+    '''
+    self.connect()
     return self.conn.cursor()
 
 
   def _iterRow(self, cursor, num_rows=100):
+    '''
+    Iterator method for access to query results.
+
+    Args:
+      cursor: The cursor that executed the query
+      num_rows: Number of rows to retrieve at a time.
+
+    Returns:
+
+    '''
     while True:
       rows = cursor.fetchmany(num_rows)
       if not rows:
@@ -60,6 +98,16 @@ class MetricsDatabase(object):
 
 
   def getSingleValue(self, csr, sql):
+    '''
+    Retrieve a single value from the resultset identifed by a SQL statement
+
+    Args:
+      csr: Cursor to use
+      sql: SQL statement to execute.
+
+    Returns:
+      First value of the first record responsive to query.
+    '''
     self._L.debug("getSingleValue: %s", sql)
     csr.execute(sql)
     row = csr.fetchone()
@@ -67,6 +115,14 @@ class MetricsDatabase(object):
 
 
   def initializeDatabase(self, sql_files):
+    '''
+    Initialize the database by executing prepared SQL commands
+
+    Args:
+      sql_files: List of file paths to execute
+
+    Returns: None
+    '''
     with self.getCursor() as csr:
       for sql_file in sql_files:
         self._L.info("Loading: %s", sql_file)
@@ -77,6 +133,12 @@ class MetricsDatabase(object):
 
 
   def summaryReport(self):
+    '''
+    Gather basic stats about the database content.
+
+    Returns: Dictionary giving count of rows in various views plus the metadata K,V pairs.
+
+    '''
     res = collections.OrderedDict()
     operations = {
       "version":"SELECT version FROM db_version;",
@@ -97,6 +159,16 @@ class MetricsDatabase(object):
 
 
   def setMetadataValue(self, k, v):
+    '''
+    Set a K,V pair in the metadata table
+
+    Args:
+      k: key for value
+      v: pickle-able value to store
+
+    Returns: None
+
+    '''
     pickled = dumps(v, protocol=PICKLE_PROTOCOL)
     sql = "INSERT INTO db_metadata (key, value) VALUES (%s, %s) ON CONFLICT (key) DO "\
           "UPDATE SET value=excluded.value"
@@ -106,6 +178,16 @@ class MetricsDatabase(object):
 
 
   def getMetadataValue(self, k, default=None):
+    '''
+    Retrieve a value from the metadata table.
+
+    Args:
+      k: Key of value to retrieve
+      default: value to return if key not available.
+
+    Returns: un-pickled value from metadta table or default if no value.
+
+    '''
     csr = self.getCursor()
     sql = "SELECT value FROM db_metadata WHERE key=%s"
     try:
@@ -120,6 +202,15 @@ class MetricsDatabase(object):
 
 
   def deleteMetadataValue(self, k):
+    '''
+    Remove a metadata entry
+
+    Args:
+      k: Key of entry to remove
+
+    Returns: None
+
+    '''
     self._L.info("Deleting metadata key %s", k)
     csr = self.getCursor()
     sql = "DELETE FROM db_metadata WHERE key=%s"
@@ -128,6 +219,11 @@ class MetricsDatabase(object):
 
 
   def getMetadata(self):
+    '''
+    Retrieve all the metadata entries
+    Returns: ordered dictionary of Key,Value
+
+    '''
     res = collections.OrderedDict()
     csr = self.getCursor()
     sql = "SELECT key, value FROM db_metadata;"
