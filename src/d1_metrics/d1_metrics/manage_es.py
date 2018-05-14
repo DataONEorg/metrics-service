@@ -12,7 +12,7 @@ import os
 import sys
 
 from d1_metrics import common
-from d1_metrics import metricsharvest
+from d1_metrics import metricselasticsearch
 
 
 def esCheck(args):
@@ -26,7 +26,7 @@ def esCheck(args):
   '''
   #Get a logger with the current method name
   _L = logging.getLogger(sys._getframe().f_code.co_name + "()")
-  elastic = metricsharvest.ElasticMetricLog(args.config)
+  elastic = metricselasticsearch.MetricsElasticSearch(args.config)
   elastic.connect()
   print(json.dumps(elastic.getInfo(show_mappings=args.verbose), indent=2))
   return 0
@@ -40,7 +40,7 @@ def esInitialize(args):
 
 def esProcessEvents(args):
   _L = logging.getLogger(sys._getframe().f_code.co_name + "()")
-  elastic = metricsharvest.ElasticMetricLog(args.config)
+  elastic = metricselasticsearch.MetricsElasticSearch(args.config)
   elastic.connect()
 
   return 0
@@ -63,7 +63,7 @@ def esGetEvents(args):
     exit code
   '''
   _L = logging.getLogger(sys._getframe().f_code.co_name + "()")
-  elastic = metricsharvest.ElasticMetricLog(args.config)
+  elastic = metricselasticsearch.MetricsElasticSearch(args.config)
   elastic.connect()
   events = elastic.getEvents(limit=args.limit)
   print(json.dumps(events, indent=2))
@@ -88,7 +88,7 @@ def esGetSearches(args):
 
   '''
   _L = logging.getLogger(sys._getframe().f_code.co_name + "()")
-  elastic = metricsharvest.ElasticMetricLog(args.config)
+  elastic = metricselasticsearch.MetricsElasticSearch(args.config)
   elastic.connect()
   events = elastic.getSearches(limit=args.limit)
   print(json.dumps(events, indent=2))

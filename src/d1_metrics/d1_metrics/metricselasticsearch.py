@@ -1,5 +1,5 @@
 '''
-Script to upload metrics from elastic search to postgres.
+Implements a wrapper for the metrics Elastic Search service.
 '''
 import logging
 import configparser
@@ -14,7 +14,10 @@ DEFAULT_ELASTIC_CONFIG = {
   "index":"logstash-test0",
   }
 
-class ElasticMetricLog(object):
+class MetricsElasticSearch(object):
+  '''
+
+  '''
 
   def __init__(self, config_file=None):
     self._L = logging.getLogger(self.__class__.__name__)
