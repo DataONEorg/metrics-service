@@ -9,12 +9,12 @@ with open(path.join(here, 'README.rst'), encoding='utf-8') as f:
   long_description = f.read()
 
 setup(
-  name='metricsServiceAPI',
+  name='d1_metrics',
 
   # Versions should comply with PEP440.  For a discussion on single-sourcing
   # the version across setup.py and the project code, see
   # https://packaging.python.org/en/latest/single_source_version.html
-  version='0.0.1',
+  version='0.0.2',
 
   description='Metrics service',
   long_description=long_description,
@@ -56,9 +56,7 @@ setup(
   # You can just specify the packages manually here if your project is
   # simple. Or you can use find_packages().
   packages=[
-    'metrics_common',
-    'metrics_database',
-    'metrics_harvest',
+    'd1_metrics',
   ],
 
   # Alternatively, if you want to distribute just a my_module.py, uncomment
@@ -94,8 +92,8 @@ setup(
   # "scripts" keyword. Entry points provide cross-platform support and allow
   # pip to create the appropriate form of executable for the target platform.
   entry_points={
-    'console_scripts': ['d1metricsdb = metrics_database.dbmanage:main',
-                        'd1metricses = metrics_harvest.esmanage:main',
+    'console_scripts': ['d1metricsdb = d1_metrics.manage_db:main',
+                        'd1metricses = d1_metrics.manage_es:main',
                         ]
   },
 )

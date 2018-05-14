@@ -6,7 +6,7 @@ try:
   from cPickle import dumps, loads, HIGHEST_PROTOCOL as PICKLE_PROTOCOL
 except ImportError:
   from pickle import dumps, loads, HIGHEST_PROTOCOL as PICKLE_PROTOCOL
-import metrics_common
+from d1_metrics import common
 
 
 CONFIG_DATABASE_SECTION = "database"

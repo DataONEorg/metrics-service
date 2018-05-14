@@ -5,13 +5,14 @@ Manage the log event Elastic Search service.
 '''
 
 
-import sys
-import os
 import argparse
-import logging
 import json
-import metrics_common
-from . import metricsharvest
+import logging
+import os
+import sys
+
+from d1_metrics import common
+from d1_metrics import metricsharvest
 
 
 def esCheck(args):
@@ -108,7 +109,7 @@ def main():
                       default=0,
                       help='Set logging level, multiples for more detailed.')
   parser.add_argument("-c", "--config",
-                      default=metrics_common.DEFAULT_CONFIG_FILE,
+                      default=common.DEFAULT_CONFIG_FILE,
                       help="Configuration file.")
   parser.add_argument("-V", "--verbose",
                       default=False,

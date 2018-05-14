@@ -1,7 +1,8 @@
-Metrics Service API
-===================
+Metrics Service Library and Tools
+=================================
 
-Implements the metrics service and the associated database management actions.
+Implements libraries for working with the metrics service and command line tools
+for administering and inspecting metrics content.
 
 
 Installation

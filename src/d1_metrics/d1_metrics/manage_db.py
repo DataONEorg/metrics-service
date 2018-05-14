@@ -4,15 +4,16 @@ Manage the postgres database.
 
 '''
 
-import sys
-import os
 import argparse
-import logging
-import psycopg2
 import glob
+import logging
+import os
+import sys
 from pprint import pprint
-import metrics_common
-from . import metricsdatabase
+
+from d1_metrics import common
+import psycopg2
+from d1_metrics import metricsdatabase
 
 
 def dbcheck(args):
@@ -86,7 +87,7 @@ def main():
                       default=0,
                       help='Set logging level, multiples for more detailed.')
   parser.add_argument("-c", "--config",
-                      default=metrics_common.DEFAULT_CONFIG_FILE,
+                      default=common.DEFAULT_CONFIG_FILE,
                       help="Configuration file.")
   parser.add_argument("--sqlinit",
                       default=None,
