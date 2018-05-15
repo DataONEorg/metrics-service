@@ -21,6 +21,7 @@ Class Diagram
 
     !include ./plantuml-styles.txt
 
+    skinparam linetype ortho
     left to right direction
 
     ' For class diagram help see http://plantuml.com/class-diagram
@@ -47,11 +48,22 @@ package d1_metrics {
         + upsert_metrics()
     }
     
+    note bottom of MetricsDatabase
+        Interacts with the PostgreSQL database
+    end note
+    
     class MetricsReporter {
         + query_SOLR()
         + generate_reports()
         + send_reports()
     }
+    
+    note bottom of MetricsReporter
+        MetricsReporter sends reports to the
+        DataCite Tech Hub on a scheduled 
+        basis.Querys DataONE Solr Search 
+        Core on the fly.
+    end note
     
     class MetricsElasticSearch {
         + getEvents()
@@ -63,6 +75,11 @@ package d1_metrics {
         - _getQueryTemplate()
         - _getQueryResults()
     }
+    
+    note bottom of MetricsElasticSearch
+        Interacts with the Elastic Search index
+    end note
+
 }
 
 package d1_metrics_service {
@@ -74,36 +91,27 @@ package d1_metrics_service {
         + on_post()
     }
 
+    note bottom of MetricsReader
+        Responds to REST requests with
+        JSON results from the database
+    end note
+
     class d1_metrics_service {
 
     }
-}
-
-interface Client {
-
-}
-
-interface Hub {
-
-}
-
-interface ElasticSearch {
+    
+    note bottom of d1_metrics_service
+        Provides the REST interface for
+        client metric queries using Falcon
+    end note
 
 }
 
     ' Define the interactions
-    Client -down- d1_metrics_service : sendsHTTPRequest >
-    d1_metrics_service -up- Client: returnsHTTPResponse >
-    d1_metrics_service -down- MetricsReader: sendsRequest > 
-    MetricsReader -up- d1_metrics_service: generatesResponse >
-    MetricsReader -down- MetricsDatabase: queryTo >
-    MetricsDatabase -up- MetricsReader: sendsResults >
-    MetricsElasticSearch -down- MetricsDatabase: performs{Create/Read/Update} >
-    MetricsDatabase -up- MetricsReporter: sendsResults >
-    MetricsReporter -up- Hub :  reportsTo >
-    MetricsElasticSearch -up- ElasticSearch : < writesTo 
-    ElasticSearch -up- MetricsElasticSearch : < readsFrom
-
+    d1_metrics_service -down- MetricsReader: requests > 
+    MetricsReader -up- MetricsDatabase: reads >
+    MetricsElasticSearch -down- MetricsDatabase: reads/updates >
+    MetricsReporter -down- MetricsDatabase: reads >
 
 
   @enduml
