@@ -7,14 +7,11 @@ Metrics Service Class Diagram
 
 - The JSON `MetricsRequest` object from the HTTP requests is passed on to the `MetricsReader` class for further processing.
 
-- The `MetricsReader` class parses the `MetricsRequest` object and based on the filtering properties calls the
-appropriate method of the `MetricsDatabase` class from the `d1_metrics` package.
+- The `MetricsReader` class parses the `MetricsRequest` object and based on the filtering properties calls the appropriate method of the `MetricsDatabase` class from the `d1_metrics` package.
 
-- The `MetricsDatabase` class has methods that establishes a connection pool and returns a cursor object that can
-perform the `DBMS CRUD` operations. This class has methods that would query the Database tables and/or Materialized views.
+- The `MetricsDatabase` class has methods that establishes a connection pool and returns a cursor object that can perform the `DBMS CRUD` operations. This class has methods that would query the Database tables and/or Materialized views.
 
-- The `MetricsDatabase` class retrieves the queries results from the Database and returns the results to the `MetricsReader`
-class. The `MetricsReader` class forms a `MetricsResponse` object which is sent back to the client as HTTP Response.
+- The `MetricsDatabase` class retrieves the queries results from the Database and returns the results to the `MetricsReader` class. The `MetricsReader` class forms a `MetricsResponse` object which is sent back to the client as HTTP Response.
 
 
 Class Diagram
