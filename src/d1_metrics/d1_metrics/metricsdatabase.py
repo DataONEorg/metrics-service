@@ -235,3 +235,36 @@ class MetricsDatabase(object):
       res[k] = v
     return res
 
+
+  def getSummaryMetricsPerDataset(self, request):
+    '''
+    Method that queries the DB materialized views
+    for the dataset landing page.
+    :return: Dictionary object containing all the results
+    '''
+    res = dict()
+    csr = self.getCursor()
+    sql = "select * from landingpage3 where dataset_id in (\'" \
+                            + "\',\'".join(request) + "\') "\
+                            + "group by month, year, metrics_name, sum, dataset_id order by month, year;"
+    csr.execute(sql)
+    # retrieving the results
+    rows = csr.fetchall()
+    # appending the results to a list and
+    # returning it to the MetricsHandler class
+    for items in res:
+      if items[1] in res:
+        res[items[1]].append(str(items[4]))
+      else:
+        res[items[1]] = []
+        res[items[1]].append(str(items[4]))
+
+      if 'Months' in res:
+        if str(items[2]) + "-" + str(items[3]) in res['Months']:
+          pass
+        else:
+          res['Months'].append(str(items[2]) + "-" + str(items[3]))
+      else:
+        res['Months'] = []
+        res['Months'].append(str(items[2]) + "-" + str(items[3]))
+    return res
