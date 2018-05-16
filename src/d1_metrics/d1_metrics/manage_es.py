@@ -10,7 +10,6 @@ import json
 import logging
 import os
 import sys
-
 from d1_metrics import common
 from d1_metrics import metricselasticsearch
 
@@ -46,6 +45,18 @@ def esProcessEvents(args):
   return 0
 
 
+def getDateStartEnd(args):
+  d_start = None
+  d_end = None
+  if args.datestart is not None:
+    d_start = common.textToDateTime(args.datestart)
+    logging.info("Start date parsed as: %s", d_start.isoformat())
+  if args.dateend is not None:
+    d_end = common.textToDateTime(args.dateend)
+    logging.info("End date parsed as: %s", d_end.isoformat())
+  return d_start, d_end
+
+
 def esGetEvents(args):
   '''
   Query the ES instance for events (default=read)
@@ -63,9 +74,11 @@ def esGetEvents(args):
     exit code
   '''
   _L = logging.getLogger(sys._getframe().f_code.co_name + "()")
+  d_start, d_end = getDateStartEnd(args)
   elastic = metricselasticsearch.MetricsElasticSearch(args.config)
   elastic.connect()
-  events = elastic.getEvents(limit=args.limit)
+  events, nhits = elastic.getEvents(limit=args.limit, date_start=d_start, date_end=d_end)
+  print("Numer of hits: {}".format(nhits))
   print(json.dumps(events, indent=2))
   return 0
 
@@ -88,9 +101,11 @@ def esGetSearches(args):
 
   '''
   _L = logging.getLogger(sys._getframe().f_code.co_name + "()")
+  d_start, d_end = getDateStartEnd(args)
   elastic = metricselasticsearch.MetricsElasticSearch(args.config)
   elastic.connect()
-  events = elastic.getSearches(limit=args.limit)
+  events, nhits = elastic.getSearches(limit=args.limit, date_start=d_start, date_end=d_end)
+  print("Numer of hits: {}".format(nhits))
   print(json.dumps(events, indent=2))
   return 0
 
@@ -119,6 +134,12 @@ def main():
                       default=10,
                       type=int,
                       help="Number of rows to return for queries (10)")
+  parser.add_argument("-S","--datestart",
+                      default=None,
+                      help="Specify date for start of records to retrieve")
+  parser.add_argument("-E","--dateend",
+                      default=None,
+                      help="Specify date for end of records to retrieve")
   parser.add_argument('command',
                       nargs='?',
                       default="check",
@@ -129,6 +150,7 @@ def main():
   level = levels[min(len(levels) - 1, args.log_level)]
   logging.basicConfig(level=level,
                       format="%(asctime)s %(name)s %(levelname)s: %(message)s")
+
   if (args.command) not in commands.keys():
     logging.error("Unknown command: %s", args.command)
     return 1
