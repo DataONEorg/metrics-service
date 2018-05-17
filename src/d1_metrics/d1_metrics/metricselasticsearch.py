@@ -3,10 +3,11 @@ Implements a wrapper for the metrics Elastic Search service.
 '''
 import logging
 import configparser
-import collections
 from elasticsearch import Elasticsearch
 from elasticsearch import helpers
 import json
+import datetime
+from pytz import timezone
 
 CONFIG_ELASTIC_SECTION = "elasticsearch"
 DEFAULT_ELASTIC_CONFIG = {
@@ -19,6 +20,8 @@ class MetricsElasticSearch(object):
   '''
 
   '''
+
+  MAX_AGGREGATIONS = 999999999 #get them all...
 
   def __init__(self, config_file=None):
     self._L = logging.getLogger(self.__class__.__name__)
@@ -33,6 +36,8 @@ class MetricsElasticSearch(object):
            scroll_kwargs=None, **kwargs):
     """
     COPIED FROM: https://github.com/elastic/elasticsearch-py/blob/master/elasticsearch/helpers/__init__.py
+    Modified to return number of results and to work with simple aggregations listing
+
     Simple abstraction on top of the
     :meth:`~elasticsearch.Elasticsearch.scroll` api - a simple iterator that
     yields all hits as returned by underlining scroll requests.
@@ -151,7 +156,7 @@ class MetricsElasticSearch(object):
     return res
 
 
-  def _getQueryTemplate(self):
+  def _getQueryTemplate(self, fields=None, date_start=None, date_end=None):
     search_body = {
       "query": {
         "bool": {
@@ -172,6 +177,16 @@ class MetricsElasticSearch(object):
         }
       }
     }
+    if not fields is None:
+      search_body["_source"] = fields
+    date_filter = None
+    if date_start is not None or date_end is not None:
+      date_filter = {"range":{"dateLogged":{}}}
+      if date_start is not None:
+        date_filter["range"]["dateLogged"]["gt"] = date_start.isoformat()
+      if date_end is not None:
+        date_filter["range"]["dateLogged"]["lte"] = date_end.isoformat()
+      search_body["query"]["bool"]["filter"] = date_filter
     return search_body
 
 
@@ -195,19 +210,17 @@ class MetricsElasticSearch(object):
     return data, total_hits
 
 
-  def getEvents(self, index=None, event_type="read", session_id=None, limit=10, date_start=None, date_end=None):
+  def getEvents(self,
+                index=None,
+                event_type="read",
+                session_id=None,
+                limit=10,
+                date_start=None,
+                date_end=None,
+                fields=None):
     if index is None:
       index = self._config["index"]
-    search_body = self._getQueryTemplate()
-    date_filter = None
-    if date_start is not None or date_end is not None:
-      date_filter = {"range":{"dateLogged":{}}}
-      if date_start is not None:
-        date_filter["range"]["dateLogged"]["gt"] = date_start.isoformat()
-      if date_end is not None:
-        date_filter["range"]["dateLogged"]["lte"] = date_end.isoformat()
-    if date_filter is not None:
-      search_body["query"]["bool"]["filter"] = date_filter
+    search_body = self._getQueryTemplate(fields=fields, date_start=date_start, date_end=date_end)
     search_body["query"]["bool"]["must"].append({"term": { "event": event_type }})
     if not session_id is None:
       sessionid_search = {"term": {"sessionid": session_id}}
@@ -215,19 +228,17 @@ class MetricsElasticSearch(object):
     return self._getQueryResults(index, search_body, limit)
 
 
-  def getSearches(self, index=None, q=None, session_id=None, limit=10, date_start=None, date_end=None):
+  def getSearches(self,
+                  index=None,
+                  q=None,
+                  session_id=None,
+                  limit=10,
+                  date_start=None,
+                  date_end=None,
+                  fields=None):
     if index is None:
       index = self._config["index"]
-    search_body = self._getQueryTemplate()
-    date_filter = None
-    if date_start is not None or date_end is not None:
-      date_filter = {"range":{"dateLogged":{}}}
-      if date_start is not None:
-        date_filter["range"]["dateLogged"]["gt"] = date_start.isoformat()
-      if date_end is not None:
-        date_filter["range"]["dateLogged"]["lte"] = date_end.isoformat()
-    if date_filter is not None:
-      search_body["query"]["bool"]["filter"] = date_filter
+    search_body = self._getQueryTemplate(fields=fields, date_start=date_start, date_end=date_end)
     if q is None:
       q = {
         "query_string": {
@@ -240,4 +251,66 @@ class MetricsElasticSearch(object):
       sessionid_search = {"term": {"sessionid": session_id}}
       search_body["query"]["bool"]["must"].append(sessionid_search)
     return self._getQueryResults(index, search_body, limit)
+
+
+  def getSessions(self,
+                  index=None,
+                  event_type=None,
+                  limit=10,
+                  date_start=None,
+                  date_end=None,
+                  min_aggs=1):
+    '''
+    Retrieve a list of session + count for each session
+    Args:
+      index:
+      event_type:
+      limit:
+      date_start:
+      date_end:
+
+    Returns:
+
+    '''
+    if index is None:
+      index = self._config["index"]
+    search_body = self._getQueryTemplate(date_start=date_start, date_end=date_end)
+    search_body["size"] = 0 #don't return any hits
+    if event_type is not None:
+      search_body["query"]["bool"]["must"].append({"term": { "event": event_type }})
+    aggregate_name = "group_by_session"
+    aggregations =  {aggregate_name: {
+                        "terms": {
+                          "field":"sessionid",                            #group by session id
+                          "size": MetricsElasticSearch.MAX_AGGREGATIONS,  #max number of groups to return
+                          "exclude": [-1,]                                #exclude terms that match values in this array
+                        },
+                        "aggs": {                                           #compute the min and max dateLogged for each session
+                          "min_date":{"min":{"field":"dateLogged"}},
+                          "max_date": {"max": {"field": "dateLogged"}},
+                        }
+                      }
+                    }
+    if min_aggs is not None:
+      aggregations[aggregate_name]["terms"]["min_doc_count"] = min_aggs
+    search_body["aggs"] = aggregations
+    self._L.info("Request: \n%s", json.dumps(search_body, indent=2))
+    resp = self._es.search(body=search_body, request_timeout=None)
+    total_hits = resp["hits"]["total"]
+    logging.info("Total hits = %d", total_hits)
+    results = []
+    counter = 0
+    naggregates = len(resp["aggregations"][aggregate_name]["buckets"])
+    UTC = timezone('UTC')
+    for bucket in resp["aggregations"][aggregate_name]["buckets"]:
+      self._L.debug(json.dumps(bucket, indent=2))
+      tmin = datetime.datetime.fromtimestamp(bucket["min_date"]["value"]/1000)
+      tmin.replace(tzinfo=UTC)
+      tmax = datetime.datetime.fromtimestamp(bucket["max_date"]["value"]/1000)
+      tmax.replace(tzinfo=UTC)
+      results.append([bucket["key"], bucket["doc_count"], tmin, tmax])
+      if counter >= limit:
+        return results, naggregates
+      counter += 1
+    return results, naggregates
 
