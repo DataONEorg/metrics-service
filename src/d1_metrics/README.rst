@@ -41,3 +41,5 @@ Check the status of the database::
     'userprofilemetrics': 0,
     'version': '0.0.1'}
 
+
+Scripts installed are listed in setup.py under ``entry_points.console_scripts``.

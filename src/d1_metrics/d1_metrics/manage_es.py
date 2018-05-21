@@ -1,6 +1,17 @@
 '''
 Manage the log event Elastic Search service.
 
+Requires that port 9200 is connected to the elastic search instance, e.g.:
+
+   ssh -L9200:localhost:9200 logproc-stage-ucsb-1.test.dataone.org
+
+Example, show events for last seven days:
+
+  d1metricses -c localconfig.ini -l events -S "7 days ago"
+
+Example, sessions with 1000 or more events::
+
+  d1metricses -c localconfig.ini  -l sessions -m 1000
 
 '''
 
@@ -77,7 +88,11 @@ def esGetEvents(args):
   d_start, d_end = getDateStartEnd(args)
   elastic = metricselasticsearch.MetricsElasticSearch(args.config)
   elastic.connect()
-  events, nhits = elastic.getEvents(limit=args.limit, date_start=d_start, date_end=d_end)
+  fields = None
+  if args.fields is not None:
+    fields = args.fields.split(",")
+    fields = [field.strip() for field in fields]
+  events, nhits = elastic.getEvents(limit=args.limit, date_start=d_start, date_end=d_end, fields=fields)
   print("Numer of hits: {}".format(nhits))
   print(json.dumps(events, indent=2))
   return 0
@@ -110,12 +125,43 @@ def esGetSearches(args):
   return 0
 
 
+def esGetSessions(args):
+  '''
+
+  Args:
+    args:
+
+  Returns:
+
+  '''
+  _L = logging.getLogger(sys._getframe().f_code.co_name + "()")
+  d_start, d_end = getDateStartEnd(args)
+  elastic = metricselasticsearch.MetricsElasticSearch(args.config)
+  elastic.connect()
+  sessions, nsessions = elastic.getSessions(limit=args.limit, date_start=d_start, date_end=d_end, min_aggs=args.minaggs)
+  print("Number of sessions matching request: {}".format(nsessions))
+  print("SessionId   Count                   Start-time                      End-time    d-min")
+  for session in sessions:
+    row = [0,0,0,0,0]
+    dt = session[3] - session[2]
+    row[0] = session[0]
+    row[1] = session[1]
+    row[2] = session[2].isoformat()
+    row[3] = session[3].isoformat()
+    row[4] = dt.days + dt.seconds/(24*60*60)
+    row[4] = row[4] * (24*60)
+    print("{0:>9}{1:>8}{2:>30}{3:>30}{4:8.2f}".format(*row))
+
+
+
+
 def main():
   commands = {
     "check":esCheck,
     "initialize":esInitialize,
     "events": esGetEvents,
     "searches": esGetSearches,
+    "sessions": esGetSessions,
   }
   parser = argparse.ArgumentParser(description=__doc__,
     formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -140,6 +186,12 @@ def main():
   parser.add_argument("-E","--dateend",
                       default=None,
                       help="Specify date for end of records to retrieve")
+  parser.add_argument("-F","--fields",
+                      default="*",
+                      help="Specify fields to show")
+  parser.add_argument("-m","--minaggs",
+                      default=1,
+                      help="Minimum number of aggregatd values in sessions to return (1)")
   parser.add_argument('command',
                       nargs='?',
                       default="check",
