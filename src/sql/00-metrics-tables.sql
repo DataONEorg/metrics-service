@@ -32,15 +32,15 @@ CREATE TABLE metrics(
  * citations table, which stores citations information from the crossref endpoint
  */
 create table citations (
-    id serial;               -- identifier of the record
-    target_id text;          -- target(dataset that was cited) identifier
-    source_id text;          -- source id
-    relation_type text;      -- relation type between source and target
-    source_id_scheme text;   -- type of source id (DOI for now)
-    source_id_url text;      -- resolving url of source identifier
-    source_type_name text;   -- type of source (e.g. literature)
-    source_sub_type text;    -- sub type (e.g. journal, book chapter)
-    source_sub_type_schema text;    -- sub type schema (e.g. crossref)
+    id serial,               -- identifier of the record
+    target_id text,          -- target(dataset that was cited) identifier
+    source_id text,          -- source id
+    relation_type text,      -- relation type between source and target
+    source_id_scheme text,   -- type of source id (DOI for now)
+    source_id_url text,      -- resolving url of source identifier
+    source_type_name text,   -- type of source (e.g. literature)
+    source_sub_type text,    -- sub type (e.g. journal, book chapter)
+    source_sub_type_schema text,    -- sub type schema (e.g. crossref)
     primary key(target_id, source_id, relation_type)
 );
 
