@@ -5,6 +5,7 @@ import logging
 import configparser
 from elasticsearch import Elasticsearch
 from elasticsearch import helpers
+import requests
 import json
 import datetime
 from pytz import timezone
@@ -13,7 +14,7 @@ CONFIG_ELASTIC_SECTION = "elasticsearch"
 DEFAULT_ELASTIC_CONFIG = {
   "host":"localhost",
   "port":9200,
-  "index":"logstash-test0",
+  "index":"eventlog-0",
   }
 
 class MetricsElasticSearch(object):
@@ -313,4 +314,60 @@ class MetricsElasticSearch(object):
         return results, naggregates
       counter += 1
     return results, naggregates
+
+
+  def getDOIs(self, index=None, q=None, session_id=None, limit=10, date_start=None, date_end=None):
+    '''
+    This method scans the logs in the Elastic Search for records with PIDs
+    :param index:
+    :param q:
+    :param session_id:
+    :param limit:
+    :param date_start:
+    :param date_end:
+    :return: Returns a List of all the dois in the ES.
+    '''
+    if index is None:
+      index = self._config["index"]
+    search_body = {
+      "query": {
+        "prefix": {
+          "pid": "doi"
+        }
+      }
+    }
+    self._L.info("Executing: %s", json.dumps(search_body, indent=2))
+    results = self._scan(query=search_body, index=index)
+    res = []
+    prefixes = []
+    count = 0
+    for hit in results:
+      res.append(hit[0]["_source"]["pid"])
+      prefixes.append(hit[0]["_source"]["pid"][4:11])
+    dois = set(res)
+    pref = set(prefixes)
+    return dois, pref
+
+
+  def getCitations(self):
+    '''
+    Gets citations from the crossref end point
+    :return:
+    '''
+    runGetDOIs = True
+    if(runGetDOIs):
+      self.connect()
+      dois, pref =  self.getDOIs()
+    else:
+      pref = {'10.6073', '10.5065', '10.1873', '10.5072', '10.1594'}
+
+    for i in pref:
+      res = requests.get("https://api.eventdata.crossref.org/v1/events/scholix?source=crossref&obj-id.prefix="+i)
+      dict = res.json()
+      for i in dict["message"]["link-packages"]:
+        if ("doi:" + i["Target"]["Identifier"]["ID"]) in dois:
+          print("Is in ? True. - " +  "doi:" + i["Target"]["Identifier"]["ID"])
+        else:
+          print("Is in ? False. - " + "doi:" + i["Target"]["Identifier"]["ID"])
+
 
