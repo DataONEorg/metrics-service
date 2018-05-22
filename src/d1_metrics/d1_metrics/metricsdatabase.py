@@ -7,14 +7,15 @@ try:
 except ImportError:
   from pickle import dumps, loads, HIGHEST_PROTOCOL as PICKLE_PROTOCOL
 from d1_metrics import common
-
+from d1_metrics.metricselasticsearch import MetricsElasticSearch
+import requests
 
 CONFIG_DATABASE_SECTION = "database"
 DEFAULT_DB_CONFIG = {
   "host":"localhost",
   "port":"5432",
   "dbname":"metrics",
-  "user":"metrics_user",
+  "user":"metrics",
   "password":""
   }
 
@@ -236,7 +237,7 @@ class MetricsDatabase(object):
     return res
 
 
-  def getSummaryMetricsPerDataset(self, request):
+  def getSummaryMetricsPerDataset(self):
     '''
     Method that queries the DB materialized views
     for the dataset landing page.
@@ -245,8 +246,8 @@ class MetricsDatabase(object):
     res = dict()
     csr = self.getCursor()
     sql = "select * from landingpage3 where dataset_id in (\'" \
-                            + "\',\'".join(request) + "\') "\
-                            + "group by month, year, metrics_name, sum, dataset_id order by month, year;"
+          + "\',\'".join(request) + "\') " \
+          + "group by month, year, metrics_name, sum, dataset_id order by month, year;"
     csr.execute(sql)
     # retrieving the results
     rows = csr.fetchall()
@@ -268,3 +269,32 @@ class MetricsDatabase(object):
         res['Months'] = []
         res['Months'].append(str(items[2]) + "-" + str(items[3]))
     return res
+
+
+  def getCitations(self):
+    '''
+    Gets citations from the crossref end point
+    :return:
+    '''
+    runGetDOIs = True
+    if(runGetDOIs):
+      mes = MetricsElasticSearch()
+      mes.connect()
+      dois, pref =  mes.getDOIs()
+    else:
+      pref = {'10.6073', '10.5065', '10.1873', '10.5072', '10.1594'}
+
+    for i in pref:
+      res = requests.get("https://api.eventdata.crossref.org/v1/events/scholix?source=crossref&obj-id.prefix="+i)
+      dict = res.json()
+      for i in dict["message"]["link-packages"]:
+        if ("doi:" + i["Target"]["Identifier"]["ID"]) in dois:
+          print("Is in ? True. - " +  "doi:" + i["Target"]["Identifier"]["ID"])
+        else:
+          print("Is in ? False. - " + "doi:" + i["Target"]["Identifier"]["ID"])
+
+
+
+if __name__ == "__main__":
+  mes = MetricsDatabase()
+  mes.getCitations()
