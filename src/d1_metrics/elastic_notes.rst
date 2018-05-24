@@ -199,6 +199,13 @@ Template for eventlog* documents::
     }
   }
 
+
+Step 7. Computing Sessions
+--------------------------
+
+
+
+
 Example Operations
 ------------------
 
@@ -295,7 +302,7 @@ then for the next page of 10,000, use the ``pid`` of the last item retrieved for
 where ``88ba351b2833f4fd12514ac1fdf8d4c1`` is the pid value of the last entry in the previous page.
 
 
-Get metrics for a PID grouped by metric type, month, and year::
+Get **metrics for a PID grouped by metric type, month, and year**::
 
     GET /eventlog-0/_search
     {
@@ -329,6 +336,8 @@ Get metrics for a PID grouped by metric type, month, and year::
         }
       }
     }
+
+See https://www.elastic.co/guide/en/elasticsearch/reference/current/search-aggregations-bucket-datehistogram-aggregation.html
 
 Not that the above does not work yet because there's no ``metric_type`` in the index (will be after re-processing) and
 the current events are only for a month of activity. Instead the below shows similar structure, except aggregating at
