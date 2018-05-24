@@ -43,3 +43,4 @@ Check the status of the database::
 
 
 Scripts installed are listed in setup.py under ``entry_points.console_scripts``.
+
