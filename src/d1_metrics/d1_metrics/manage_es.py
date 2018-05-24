@@ -153,6 +153,15 @@ def esGetSessions(args):
     print("{0:>9}{1:>8}{2:>30}{3:>30}{4:8.2f}".format(*row))
 
 
+def esLoadtoDatabase(args):
+  '''
+
+  Args:
+    args:
+
+  Returns:
+
+  '''
 
 
 def main():
