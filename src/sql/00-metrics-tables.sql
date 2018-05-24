@@ -15,17 +15,18 @@ CREATE TABLE db_version (
 INSERT into db_version (version, status) VALUES ('0.0.2', 1);
 CREATE TABLE metrics(
     serial_no SERIAL,           -- the identifier for the record
-    dataset_id TEXT,           -- the identifier for the dataset
-    user_id TEXT,           -- the identifier for the user
-    repository TEXT,           -- the identifier for the repository (member node)
-    funding_number TEXT,           -- the funding number under which the dataset was published
-    award_number TEXT,           -- the award number under which the dataset was published
-    day INTEGER,           -- day of the occurence of the event
-    month INTEGER,           -- month of the occurence of the event
-    year INTEGER,           -- year of the occurence of the event
-    location TEXT,           -- location of the user accessing the dataset
-    metrics_name TEXT,           -- metrics name for given dataset
-    metrics_value INTEGER           -- count of metric event for that dataset
+    dataset_id TEXT,            -- the identifier for the dataset, source: pid
+    user_id TEXT,               -- the identifier for the user, source: rights_holder
+    repository TEXT,            -- the identifier for the repository, source: member node
+    funding_number TEXT,        -- the funding number under which the dataset was published, source: not available
+    award_number TEXT,          -- the award number under which the dataset was published, source: not available
+    day INTEGER,                -- day of the occurence of the event, source: dateLogged
+    month INTEGER,              -- month of the occurence of the event, source: dateLogged
+    year INTEGER,               -- year of the occurence of the event, source: dateLogged
+    country_code TEXT,          -- location of the user accessing the dataset
+    geohash4 TEXT,              -- Geohash value at level 4.
+    metrics_name TEXT,          -- metrics name for given dataset
+    metrics_value INTEGER       -- count of metric event for that dataset
 );
 /*
  * db_metadata -- table to store arbitrary key, value pairs for application state and configuration
