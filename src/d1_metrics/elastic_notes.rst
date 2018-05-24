@@ -207,7 +207,7 @@ Query everything in the eventlog index::
   GET /eventlog-*/_search
 
 
-Get events from the month of May 2018 using `date range query <daterangequery_>`::
+**Get events from the month** of May 2018 using `date range query <daterangequery_>`::
 
   GET /eventlog-*/_search
   {
@@ -224,19 +224,28 @@ Get events from the month of May 2018 using `date range query <daterangequery_>`
 .. _daterangequery: https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-range-query.html
 
 
-Get total events for each PID for the month of May 2018. This requires paging of the results. To do so, start with::
+Get **total read events for each PID for the month** of May 2018. This requires paging of the results. To do so, start with::
 
   GET /eventlog-*/_search
   {
     "query": {
-      "range": {
-        "dateLogged": {
-          "gte": "2018-05-01||/M",
-          "lt": "2018-06-01||/M"
+      "bool":{
+        "must":[{
+          "range": {
+          "dateLogged": {
+            "gte": "2018-05-01||/M",
+            "lt": "2018-06-01||/M"
+            }
+          }
+        },
+        {
+          "term":{"event.key":"read"}
         }
+      ]
       }
     },
     "size":0,
+    "track_total_hits": false,
     "aggs":{
       "pid_list": {
         "composite": {
@@ -254,14 +263,23 @@ then for the next page of 10,000, use the ``pid`` of the last item retrieved for
   GET /eventlog-*/_search
   {
     "query": {
-      "range": {
-        "dateLogged": {
-          "gte": "2018-05-01||/M",
-          "lt": "2018-06-01||/M"
+      "bool":{
+        "must":[{
+          "range": {
+          "dateLogged": {
+            "gte": "2018-05-01||/M",
+            "lt": "2018-06-01||/M"
+            }
+          }
+        },
+        {
+          "term":{"event.key":"read"}
         }
+      ]
       }
     },
     "size":0,
+    "track_total_hits": false,
     "aggs":{
       "pid_list": {
         "composite": {
@@ -276,3 +294,68 @@ then for the next page of 10,000, use the ``pid`` of the last item retrieved for
 
 where ``88ba351b2833f4fd12514ac1fdf8d4c1`` is the pid value of the last entry in the previous page.
 
+
+Get metrics for a PID grouped by metric type, month, and year::
+
+    GET /eventlog-0/_search
+    {
+      "query": {
+              "term": {
+                "pid.key": "cbfs.127.22"
+              }
+      },
+      "size": 0,
+      "aggs": {
+        "group_by_metric" :{
+          "terms": {
+            "field": "metric_type.key"
+          },
+          "aggs": {
+            "group_by_month": {
+              "date_histogram": {
+                "field": "dateLogged",
+                "interval": "month"
+              },
+              "aggs": {
+                "group_by_day": {
+                  "date_histogram": {
+                    "field": "dateLogged",
+                    "interval":"day"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+Not that the above does not work yet because there's no ``metric_type`` in the index (will be after re-processing) and
+the current events are only for a month of activity. Instead the below shows similar structure, except aggregating at
+month and day levels::
+
+    GET /eventlog-*/_search
+    {
+      "query": {
+              "term": {
+                "pid.key": "cbfs.127.22"
+              }
+      },
+      "size": 0,
+      "aggs": {
+        "group_by_month": {
+          "date_histogram": {
+            "field": "dateLogged",
+            "interval": "month"
+          },
+          "aggs": {
+            "group_by_day": {
+              "date_histogram": {
+                "field": "dateLogged",
+                "interval":"day"
+              }
+            }
+          }
+        }
+      }
+    }
