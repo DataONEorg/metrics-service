@@ -5,6 +5,7 @@ import logging
 import configparser
 from elasticsearch import Elasticsearch
 from elasticsearch import helpers
+import requests
 import json
 import datetime
 from pytz import timezone
@@ -13,7 +14,7 @@ CONFIG_ELASTIC_SECTION = "elasticsearch"
 DEFAULT_ELASTIC_CONFIG = {
   "host":"localhost",
   "port":9200,
-  "index":"logstash-test0",
+  "index":"eventlog-0",
   }
 
 class MetricsElasticSearch(object):
