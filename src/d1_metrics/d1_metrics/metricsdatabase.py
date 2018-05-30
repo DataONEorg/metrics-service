@@ -10,15 +10,15 @@ except ImportError:
 from d1_metrics import common
 from d1_metrics.metricselasticsearch import MetricsElasticSearch
 import requests
-from solrclient import SolrClient
-from solrclient import SolrSearchResponseIterator
+from . import solrclient
+
 
 CONFIG_DATABASE_SECTION = "database"
 DEFAULT_DB_CONFIG = {
   "host":"localhost",
   "port":"5432",
-  "dbname":"metrics",
-  "user":"metrics_user",
+  "dbname":"ci",
+  "user":"metrics",
   "password":""
   }
 
@@ -285,42 +285,51 @@ class MetricsDatabase(object):
     else:
       pref = {'10.5066', '10.6085', '10.6073', '10.1575', '10.5065', '10.1873', '10.5072', '10.5063', '10.6067'}
 
-
+    print(len(dois))
+    # print(dois)
+    print(", ".join(pref))
+    cd = SolrClient('https://cn-ucsb-1.dataone.org/cn/v2/query', 'solr')
     count = 0
     for i in pref:
       res = requests.get("https://api.eventdata.crossref.org/v1/events/scholix?source=crossref&obj-id.prefix="+i)
       dict = res.json()
-      for i in dict["message"]["link-packages"]:
+      for val in dict["message"]["link-packages"]:
         if ("doi:" + i["Target"]["Identifier"]["ID"]) in dois:
           count = count + 1
           print()
           print("Count  -> " + str(count))
-          print("Link_Publication_Date -> " + i["LinkPublicationDate"])
-          print("Target_ID -> " + i["Target"]["Identifier"]["ID"])
-          print("Source_ID -> " + i["Source"]["Identifier"]["ID"])
-          print("RelationshipType -> " + i["RelationshipType"]["Name"])
-          print("Source_ID_Scheme -> " + i["Source"]["Identifier"]["IDScheme"])
-          print("Source_ID_URL -> " + i["Source"]["Identifier"]["IDUrl"])
-          print("Source_Type_Name -> " + i["Source"]["Type"]["Name"])
-          print("Source_Type_SubType -> " + i["Source"]["Type"]["SubType"])
-          print("Source_Type_SubTypeSchema -> " + i["Source"]["Type"]["SubTypeSchema"])
+          print("Link_Publication_Date -> " + val["LinkPublicationDate"])
+          print("Target_ID -> " + val["Target"]["Identifier"]["ID"])
+          print("Source_ID -> " + val["Source"]["Identifier"]["ID"])
+          print("RelationshipType -> " + val["RelationshipType"]["Name"])
+          print("Source_ID_Scheme -> " + val["Source"]["Identifier"]["IDScheme"])
+          print("Source_ID_URL -> " + val["Source"]["Identifier"]["IDUrl"])
+          print("Source_Type_Name -> " + val["Source"]["Type"]["Name"])
+          print("Source_Type_SubType -> " + val["Source"]["Type"]["SubType"])
+          print("Source_Type_SubTypeSchema -> " + val["Source"]["Type"]["SubTypeSchema"])
           print()
         else:
           pass
 
   def getDOIs(self):
     """
-    Scans the solr end point for citations
+    Scans the solr end point for DOIs
     :return: Set objects containing dois and their prefixes
     """
-    cd = SolrClient('https://cn-ucsb-1.dataone.org/cn/v2/query', 'solr')
-    data = cd.getFieldValues('id', q='id:doi*')
+    cd = solrclient.SolrClient('https://cn-ucsb-1.dataone.org/cn/v2/query', 'solr')
+    data = cd.getFieldValues('id', q='id:*doi*')
     res = []
     prefixes = []
     for hit in data['id'][::2]:
-      res.append(hit)
-      prefixes.append(hit[4:11])
+      start_doi = hit.index("10.")
+      res.append(hit[start_doi:])
+      prefixes.append(hit[start_doi:start_doi+7])
     dois = set(res)
     pref = set(prefixes)
     return dois, pref
 
+
+
+if __name__ == "__main__":
+  md = MetricsDatabase()
+  md.getCitations()
