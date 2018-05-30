@@ -35,6 +35,7 @@ class MetricsElasticSearch(object):
     if not config_file is None:
       self.loadConfig(config_file)
     self._session_id = None
+    self._doc_type = "doc"
 
 
   def _scan(self, query=None, scroll='5m', raise_on_error=True,
@@ -539,17 +540,102 @@ class MetricsElasticSearch(object):
     return None
 
 
-  def getLastProcessedEventDatetimeByIp(self, index_name, clent_ip):
-    raise NotImplementedError()
+  def getLastProcessedEventDatetimeByIp(self, index_name, client_ip):
+    search_body = {
+      "from": 0, "size": 0,
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "term": {"beat.name": "eventlog"}
+            },
+            {
+              "term":{"event.key": "read"}
+            },
+            {
+              "exists": {
+                "field": "sessionid"
+              }
+            },
+            {
+              "range": {
+                "sessionId": {"gt": 0}
+              }
+            },
+            {
+              "term": {"ipAddress": client_ip}
+            }
+          ],
+        }
+      },
+      "aggs": {
+        "max_timestamp": {
+          "max": {
+            "field": "dateLogged"
+          }
+        }
+      }
+    }
+    try:
+      results = self._es.search(index=index_name, body=search_body)
+      esvalue = results["aggregations"]["max_timestamp"]["value"] or None
+      if esvalue is None:
+        raise ValueError("No max_timestamp available!")
+      mark = datetime.datetime.fromtimestamp(esvalue / 1000, tz=tzutc())
+      return mark
+    except Exception as e:
+      self._L.error(e)
+    return None
 
 
   def removeStaleSessionIds(self, index_name, client_ip, time_stamp):
-    raise NotImplementedError()
+    search_body = {
+      "script": {
+        "inline": "ctx._source.remove(\"sessionId\")",
+        "lang": "painless"
+      },
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "term": {"beat.name": "eventlog"}
+            },
+            {
+              "exists": {
+                "field": "sessionId"
+              }
+            },
+            {
+              "range": {
+                "sessionId": {"gt": 0}
+              }
+            },
+            {
+              "term": {"ipAddress": client_ip}
+            },
+            {
+              "range": {
+                "@timestamp": {"gt": time_stamp.isoformat()}
+              }
+            }
+          ]
+        }
+      }
+    }
+    self._es.indices.refresh(index_name)
+    results = self._es.update_by_query(index=index_name,
+                                       body=search_body,
+                                       conflicts="proceed",
+                                       wait_for_completion="true")
+    self._es.indices.refresh(index_name)
+    self._L.debug(results)
+    return results
 
 
   def updateRecord(self, index_name, record):
     self._es.update(index=index_name,
                     id = record["_id"],
+                    doc_type=self._doc_type,
                     body={"doc": record["_source"]})
 
 
@@ -573,7 +659,7 @@ class MetricsElasticSearch(object):
           self.removeStaleSessionIds(index_name, client_ip, dateparser.parse(timestamp))
           self._L.warning("After update %s", self.getLastProcessedEventDatetimeByIp(index_name, client_ip))
 
-      session = live_sessions.get()
+      session = live_sessions.get(client_ip)
       if session is None:
         live_sessions[client_ip] = {}
         live_sessions[client_ip]["sessionId"] = next(self._session_id)
@@ -595,8 +681,7 @@ class MetricsElasticSearch(object):
 
 
   def computeSessions(self,
-                      index_name=None,
-                      session_ttl=SESSION_TTL_MINUTES):
+                      index_name=None):
     if index_name is None:
       index_name = self._config["index"]
     self._session_id = self.getNextSessionId(index_name)
@@ -616,7 +701,6 @@ class MetricsElasticSearch(object):
       live_sessions = self.getLiveSessionsBeforeMark(index_name, mark)
       self._L.debug(json.dumps(live_sessions))
       new_events = self.getNewEvents(index_name, batch_size)
-      return
       self.processNewEvents(index_name, new_events, live_sessions)
       self._L.info("Processed batch %d of %d", batch_counter, total_batches)
       batch_counter += 1
