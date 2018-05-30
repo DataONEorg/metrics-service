@@ -8,7 +8,10 @@ from elasticsearch import helpers
 import requests
 import json
 import datetime
+from dateutil import parser as dateparser
+from dateutil.tz import tzutc
 from pytz import timezone
+import json
 
 CONFIG_ELASTIC_SECTION = "elasticsearch"
 DEFAULT_ELASTIC_CONFIG = {
@@ -23,6 +26,7 @@ class MetricsElasticSearch(object):
   '''
 
   MAX_AGGREGATIONS = 999999999 #get them all...
+  SESSION_TTL_MINUTES = 60
 
   def __init__(self, config_file=None):
     self._L = logging.getLogger(self.__class__.__name__)
@@ -30,6 +34,7 @@ class MetricsElasticSearch(object):
     self._config = DEFAULT_ELASTIC_CONFIG
     if not config_file is None:
       self.loadConfig(config_file)
+    self._session_id = None
 
 
   def _scan(self, query=None, scroll='5m', raise_on_error=True,
@@ -315,3 +320,304 @@ class MetricsElasticSearch(object):
       counter += 1
     return results, naggregates
 
+
+  def countUnprocessedEvents(self, index_name):
+    '''
+    Count the number of events that have no sessionId
+
+    Args:
+      index_name:
+
+    Returns:
+
+    '''
+    count = 0
+    search_body = {
+      "from": 0, "size": 0,
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "term": {"beat.name": "eventlog"}
+            },
+            {
+              "term": {"event.key": "read"}
+            },
+          ],
+          "must_not": {
+            "exists": {
+              "field": "sessionid"
+            }
+          }
+        }
+      }
+    }
+    try:
+      results = self._es.search(index=index_name, body=search_body)
+      count = results["hits"]["total"]
+      if count is None:
+        raise ValueError("no total hits!")
+      return count
+    except Exception as e:
+      self._L.error(e)
+    return 0
+
+
+  def getNextSessionId(self, index_name):
+    '''
+    Generator for sessionIds.
+
+    Gets the next available session id (long type)
+    Args:
+      index_name:
+
+    Returns:
+      long
+    '''
+    search_body = {
+      "from": 0, "size": 0,
+      "aggs": {
+        "max_id": {
+          "max": {
+            "field": "sessionId"
+          }
+        }
+      }
+    }
+    results = self._es.search(index=index_name, body=search_body)
+    last_session_id = results["aggregations"]["max_id"]["value"] or 0
+    next_session_id = int(last_session_id)
+    yield next_session_id
+    while True:
+      next_session_id += 1
+      yield next_session_id
+
+
+  def getFirstUnprocessedEventDatetime(self, index_name):
+    search_body = {
+      "from": 0, "size": 0,
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "term": {"beat.name": "eventlog"}
+            },
+            {
+              "term": {"event.key": "read"}
+            },
+          ],
+          "must_not": {
+            "exists": {
+              "field": "sessionid"
+            }
+          }
+        }
+      },
+      "aggs": {
+        "min_timestamp": {
+          "min": {
+            "field": "dateLogged"
+          }
+        }
+      }
+    }
+    try:
+      results = self._es.search(index=index_name, body=search_body)
+      esvalue = results["aggregations"]["min_timestamp"]["value"] or None
+      if esvalue is None:
+        raise ValueError("No max dateLogged available!")
+      mark = datetime.datetime.fromtimestamp(esvalue / 1000, tz=tzutc())
+      return mark
+    except Exception as e:
+      self._L.error(e)
+    return None
+
+
+  def getLiveSessionsSearchBody(self, mark):
+    search_body = {
+      "from": 0, "size": 0,
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "term": {"beat.name": "eventlog"}
+            },
+            {
+              "term":{"event.key": "read"}
+            },
+          ],
+          "filter": {
+            "range": {
+              "dateLogged": {
+                "gte": "",
+                "lt": ""
+              }
+            }
+          }
+        }
+      },
+      "aggs": {
+        "group": {
+          "terms": {
+            "field": "ipAddress"
+          },
+          "aggs": {
+            "group_docs": {
+              "top_hits": {
+                "size": 1,
+                "sort": [{
+                  "@timestamp": {
+                    "order": "desc",
+                    "unmapped_type": "date"
+                  }
+                }],
+                "_source": {"includes": ["dateLogged", "ipAddress", "sessionid"]}
+              }
+            }
+          }
+        }
+      }
+    }
+    gte = mark.isoformat() + "||-" + str(MetricsElasticSearch.SESSION_TTL_MINUTES) + "m"
+    lt = mark.isoformat()
+    search_body["query"]["bool"]["filter"]["range"]["dateLogged"]["gte"] = gte
+    search_body["query"]["bool"]["filter"]["range"]["dateLogged"]["lt"] = lt
+    return search_body
+
+
+  def getLiveSessionsBeforeMark(self, index_name, mark):
+    live_sessions = {}
+    search_body = self.getLiveSessionsSearchBody( mark )
+    self._L.debug(json.dumps(search_body, indent=2))
+    results = self._es.search(index=index_name, body=search_body)
+    self._L.debug(str(results))
+    for item in results["aggregations"]["group"]["buckets"]:
+      record = item["group_docs"]["hits"]["hits"][0]["_source"]
+      time_stamp = record.get("dateLoged")
+      client_ip = record.get("ipAddress")
+      session_id = record.get("sessionId")
+      live_sessions[client_ip] = {}
+      live_sessions[client_ip]["timestamp"] = time_stamp
+      live_sessions[client_ip]["sessionId"] = session_id
+    return live_sessions
+
+
+  def getNewEvents(self, index_name, batch_size):
+    search_body = {
+      "from": 0, "size": batch_size,
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "term": {"beat.name": "eventlog"}
+            },
+            {
+              "term":{"event.key": "read"}
+            },
+          ],
+          "must_not": {
+            "exists": {
+              "field": "sessionId"
+            }
+          }
+        }
+      },
+      "sort": [{
+        "dateLogged": {
+          "order": "asc",
+          "unmapped_type": "date"
+        }
+      }]
+    }
+    try:
+      results = self._es.search(index=index_name, body=search_body)
+      if results["hits"]["hits"] is None:
+        raise ValueError("No hits in result.")
+      return results
+    except Exception as e:
+      self._L.error(e)
+    return None
+
+
+  def getLastProcessedEventDatetimeByIp(self, index_name, clent_ip):
+    raise NotImplementedError()
+
+
+  def removeStaleSessionIds(self, index_name, client_ip, time_stamp):
+    raise NotImplementedError()
+
+
+  def updateRecord(self, index_name, record):
+    self._es.update(index=index_name,
+                    id = record["_id"],
+                    body={"doc": record["_source"]})
+
+
+  def processNewEvents(self, index_name, new_events, live_sessions):
+    for record in new_events["hits"]["hits"]:
+      # check for records that failed to parse in logstash
+      # and assign a sessionid of -1. This is uncommon.
+      recordtags = record["_source"].get("tags")
+      if ("_jsonparsefailure" in recordtags
+          or "_geoip_lookup_failure" in recordtags):
+        record["_source"]["sessionid"] = -1
+        self.updateRecord(index_name, record)
+        continue
+      timestamp = record["_source"].get("dateLogged")
+      client_ip = record["_source"].get("ipAddress")
+
+      last_entry_date = self.getLastProcessedEventDatetimeByIp(index_name, client_ip)
+      if last_entry_date is not None:
+        if last_entry_date > dateparser.parse(timestamp):
+          self._L.warning("Found events after %s for %s",timestamp, client_ip)
+          self.removeStaleSessionIds(index_name, client_ip, dateparser.parse(timestamp))
+          self._L.warning("After update %s", self.getLastProcessedEventDatetimeByIp(index_name, client_ip))
+
+      session = live_sessions.get()
+      if session is None:
+        live_sessions[client_ip] = {}
+        live_sessions[client_ip]["sessionId"] = next(self._session_id)
+        live_sessions[client_ip]["timestamp"] = timestamp
+        session = live_sessions[client_ip]
+
+      delta = dateparser.parse(timestamp) - dateparser.parse(session["timestamp"])
+      if ((delta.total_seconds() / 60 ) > MetricsElasticSearch.SESSION_TTL_MINUTES):
+        live_sessions[client_ip]["sessionId"] = next(self._session_id)
+
+      session["timestamp"] = timestamp
+      record["_source"]["sessionId"] = session["sessionId"]
+
+      request = record["_source"].get("request", "")
+      if request.startswith("/cn/v2/query/solr/"):
+        record["_source"]["searchevent"] = True
+      self.updateRecord(index_name, record)
+
+
+
+  def computeSessions(self,
+                      index_name=None,
+                      session_ttl=SESSION_TTL_MINUTES):
+    if index_name is None:
+      index_name = self._config["index"]
+    self._session_id = self.getNextSessionId(index_name)
+    batch_size = 500
+    batch_counter = 0
+    self._es.indices.refresh(index_name)
+    unprocessed_count = self.countUnprocessedEvents(index_name)
+    self._L.info("Unprocessed events = %d", unprocessed_count)
+    total_batches = unprocessed_count / batch_size + bool(unprocessed_count % batch_size)
+    self._L.info("Number of batches = %d at %d per batch", total_batches, batch_size)
+    while True:
+      self._es.indices.refresh(index_name)
+      mark = self.getFirstUnprocessedEventDatetime(index_name)
+      if mark is None:
+        return 0
+      self._L.info("At mark: %s", mark.isoformat())
+      live_sessions = self.getLiveSessionsBeforeMark(index_name, mark)
+      self._L.debug(json.dumps(live_sessions))
+      new_events = self.getNewEvents(index_name, batch_size)
+      return
+      self.processNewEvents(index_name, new_events, live_sessions)
+      self._L.info("Processed batch %d of %d", batch_counter, total_batches)
+      batch_counter += 1
+    return 1
