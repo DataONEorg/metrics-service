@@ -3,9 +3,8 @@ Metrics Reader module
 """
 import json
 import falcon
-from urllib.parse import urlparse
 
-from d1_metrics.metricsdatabase import MetricsDatabase
+from d1_metrics.d1_metrics.metricsdatabase import MetricsDatabase
 
 
 class MetricsReader:
@@ -25,14 +24,7 @@ class MetricsReader:
         :return: HTTP Response object
         """
 
-        #taking query parametrs from the HTTP GET request and forming metricsRequest Object
-        metrics_request = {}
-        query_param = urlparse(req.url)
-
-        for i in query_param.query.split("&"):
-            query = i.split(":")
-            metrics_request[query[0]] = ":".join(query[1:])
-
+        metrics_request = json.loads(req.get_header('metricsRequest'))
 
         resp.body = json.dumps(self.process_request(metrics_request), ensure_ascii=False)
 
