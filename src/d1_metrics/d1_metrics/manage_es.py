@@ -153,15 +153,19 @@ def esGetSessions(args):
     print("{0:>9}{1:>8}{2:>30}{3:>30}{4:8.2f}".format(*row))
 
 
-def esLoadtoDatabase(args):
+def esComputeSessions(args):
   '''
-
+  Compute session information for events.
   Args:
     args:
 
   Returns:
 
   '''
+  _L = logging.getLogger(sys._getframe().f_code.co_name + "()")
+  elastic = metricselasticsearch.MetricsElasticSearch(args.config)
+  elastic.connect()
+  elastic.computeSessions()
 
 
 def main():
@@ -171,6 +175,7 @@ def main():
     "events": esGetEvents,
     "searches": esGetSearches,
     "sessions": esGetSessions,
+    "compute": esComputeSessions,
   }
   parser = argparse.ArgumentParser(description=__doc__,
     formatter_class=argparse.RawDescriptionHelpFormatter)
