@@ -131,6 +131,15 @@ class MetricsElasticSearch(object):
 
 
   def loadConfig(self, config_file):
+    '''
+    Load configuration details from a YAML config file
+
+    Args:
+      config_file: path to a yaml config file
+
+    Returns:
+      loaded configuration information
+    '''
     config = configparser.ConfigParser()
     self._L.debug("Loading configuration from %s", config_file)
     config.read(config_file)
@@ -141,6 +150,15 @@ class MetricsElasticSearch(object):
 
 
   def connect(self, force_reconnect=False):
+    '''
+    Connect to the ElasticSearch server
+
+    Args:
+      force_reconnect: Force a reconnection even if one is already created
+
+    Returns:
+      nothing
+    '''
     if self._es is not None and not force_reconnect:
       self._L.info("Elastic Search connection already established.")
       return
@@ -151,6 +169,15 @@ class MetricsElasticSearch(object):
 
 
   def getInfo(self, show_mappings=False):
+    '''
+    Get basic information about the Elastic Search instance.
+
+    Args:
+      show_mappings:
+
+    Returns:
+
+    '''
     res = {}
     res["info"] = self._es.info()
     indices = self._es.cat.indices(format="json")
@@ -163,27 +190,29 @@ class MetricsElasticSearch(object):
     return res
 
 
-  def _getQueryTemplate(self, fields=None, date_start=None, date_end=None):
+  def _getQueryTemplate(self,
+                        fields=None,
+                        date_start=None,
+                        date_end=None,
+                        formatTypes=None,
+                        session_required=True):
     search_body = {
       "query": {
         "bool": {
           "must": [
             {
-              "term": {"_type": "logevent"}
-            },
-            {
               "term": { "beat.name": "eventlog" }
             },
-            {
-              "term": { "formatType": "data" }
-            },
-            {
-              "exists": { "field": "sessionid" }
-            }
           ]
         }
       }
     }
+    if formatTypes is not None:
+      entry = {"term": { "formatType": formatTypes } }
+      search_body["query"]["bool"]["must"].append(entry)
+    if session_required:
+      entry = {"exists": {"field": "sessionId"} }
+      search_body["query"]["bool"]["must"].append(entry)
     if not fields is None:
       search_body["_source"] = fields
     date_filter = None
@@ -324,13 +353,13 @@ class MetricsElasticSearch(object):
 
   def countUnprocessedEvents(self, index_name):
     '''
-    Count the number of events that have no sessionId
+    Count the number of events that have no sessionId.
 
     Args:
-      index_name:
+      index_name: name of the index containing events
 
     Returns:
-
+      integer, number of events without a sessionId
     '''
     count = 0
     search_body = {
@@ -347,7 +376,7 @@ class MetricsElasticSearch(object):
           ],
           "must_not": {
             "exists": {
-              "field": "sessionid"
+              "field": "sessionId"
             }
           }
         }
@@ -584,7 +613,7 @@ class MetricsElasticSearch(object):
       mark = datetime.datetime.fromtimestamp(esvalue / 1000, tz=tzutc())
       return mark
     except Exception as e:
-      self._L.error(e)
+      self._L.debug(e)
     return None
 
 
@@ -640,7 +669,12 @@ class MetricsElasticSearch(object):
 
 
   def processNewEvents(self, index_name, new_events, live_sessions):
+    counter = 0
+    total_count = len(new_events["hits"]["hits"])
     for record in new_events["hits"]["hits"]:
+      counter += 1
+      if counter % 50 == 0:
+        self._L.info("%d / %d", counter, total_count)
       # check for records that failed to parse in logstash
       # and assign a sessionid of -1. This is uncommon.
       recordtags = record["_source"].get("tags")
@@ -682,6 +716,10 @@ class MetricsElasticSearch(object):
 
   def computeSessions(self,
                       index_name=None):
+    es_logger = logging.getLogger('elasticsearch')
+    es_logger.propagate = False
+    es_logger.setLevel(logging.WARNING)
+
     if index_name is None:
       index_name = self._config["index"]
     self._session_id = self.getNextSessionId(index_name)
@@ -692,6 +730,7 @@ class MetricsElasticSearch(object):
     self._L.info("Unprocessed events = %d", unprocessed_count)
     total_batches = unprocessed_count / batch_size + bool(unprocessed_count % batch_size)
     self._L.info("Number of batches = %d at %d per batch", total_batches, batch_size)
+    #return
     while True:
       self._es.indices.refresh(index_name)
       mark = self.getFirstUnprocessedEventDatetime(index_name)
