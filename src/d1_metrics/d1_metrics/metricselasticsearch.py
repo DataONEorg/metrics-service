@@ -168,16 +168,16 @@ class MetricsElasticSearch(object):
         "bool": {
           "must": [
             {
-              "term": {"_type": "logevent"}
+              "term": {"beat.name": "eventlog"}
             },
             {
-              "term": { "beat.name": "eventlog" }
-            },
-            {
-              "term": { "formatType": "data" }
-            },
-            {
-              "exists": { "field": "sessionid" }
+              "terms":
+                {
+                  "formatType": [
+                    "DATA",
+                    "METADATA"
+                  ]
+                }
             }
           ]
         }
@@ -227,9 +227,9 @@ class MetricsElasticSearch(object):
     if index is None:
       index = self._config["index"]
     search_body = self._getQueryTemplate(fields=fields, date_start=date_start, date_end=date_end)
-    search_body["query"]["bool"]["must"].append({"term": { "event": event_type }})
+    search_body["query"]["bool"]["must"].append({"term": { "event.key": event_type }})
     if not session_id is None:
-      sessionid_search = {"term": {"sessionid": session_id}}
+      sessionid_search = {"term": {"sessionId": session_id}}
       search_body["query"]["bool"]["must"].append(sessionid_search)
     return self._getQueryResults(index, search_body, limit)
 
@@ -621,3 +621,72 @@ class MetricsElasticSearch(object):
       self._L.info("Processed batch %d of %d", batch_counter, total_batches)
       batch_counter += 1
     return 1
+
+
+  def get_report_aggregations(self,
+                  index=None,
+                  event_type="read",
+                  limit=10,
+                  date_start=None,
+                  date_end=None,
+                  min_aggs=1):
+    '''
+    Retrieve a list of session + count for each session
+    Args:
+      index:
+      event_type:
+      limit:
+      date_start:
+      date_end:
+
+    Returns:
+
+    '''
+    if index is None:
+      index = self._config["index"]
+    search_body = {
+      "size" : 0,
+      "query": {
+        "bool": {
+          "filter": {
+            "range": {
+              "dateLogged": {
+                "gte": "2018-05-20T00:00:00",
+                "lte": "2018-05-31T00:00:00"
+              }
+            }
+          }
+        }
+      },
+      "aggs": {
+        "pid": {
+          "terms": {
+            "field": "pid.key",
+            "size" : 100
+          },
+          "aggs": {
+            "format": {
+              "terms": {
+                "field": "formatType",
+                "size" : 100
+              },
+              "aggs": {
+                "country": {
+                  "terms": {
+                    "field": "country.key",
+                    "size" : 100
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    self._L.info("Request: \n%s", json.dumps(search_body, indent=2))
+    resp = self._es.search(body=search_body, request_timeout=None)
+    return(resp["aggregations"])
+
+
+
+
