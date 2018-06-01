@@ -61,6 +61,36 @@ class MetricsReporter(object):
         return (report_header)
 
 
+    def get_unique_pids(self, start_date, end_date):
+        metrics_elastic_search = MetricsElasticSearch()
+        metrics_elastic_search.connect()
+        pid_list = []
+        unique_pids = ()
+        query = [
+            {
+                "term": {"formatType": "METADATA"}
+            },
+            {
+                "term": {"event.key": "read"}
+            },
+            {
+                "exists": {
+                    "field": "sessionId"
+                }
+            }
+        ]
+        fields = "pid"
+        results, total = metrics_elastic_search.getSearches(limit=1000000, q = query, date_start=datetime.strptime(start_date,"%Y-%m-%d")\
+                                                     , date_end=datetime.strptime(end_date,"%Y-%m-%d"), fields=fields)
+
+        for i in range(total):
+            pid_list.append(results[i]["pid"])
+        unique_pids = set(pid_list)
+        print(len(pid_list))
+        print(len(unique_pids))
+
+
+
     def get_report_datasets(self, json_object ):
         metrics_elastic_search = MetricsElasticSearch()
         metrics_elastic_search.connect()
@@ -178,4 +208,5 @@ if __name__ == "__main__":
   # md.get_report_datasets(md.get_report_header("01/20/2018", "02/20/2018"))
   # md.resolve_MN("urn:node:KNB")
   # md.query_solr("df35b.302.1")
-  md.report_handler("05/01/2018", "05/31/2018")
+  # md.report_handler("05/01/2018", "05/31/2018")
+  md.get_unique_pids()

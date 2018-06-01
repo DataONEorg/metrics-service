@@ -749,10 +749,10 @@ class MetricsElasticSearch(object):
   def get_report_aggregations(self,
                   index=None,
                   event_type="read",
-                  limit=10,
-                  date_start=None,
-                  date_end=None,
-                  min_aggs=1):
+                  limit=100,
+                  date_start="",
+                  date_end="",
+                  after_record = None):
     '''
     Retrieve a list of session + count for each session
     Args:
@@ -762,7 +762,7 @@ class MetricsElasticSearch(object):
       date_start:
       date_end:
 
-    Returns:
+    Returns: Aggregations dictionary
 
     '''
     if index is None:
@@ -776,59 +776,93 @@ class MetricsElasticSearch(object):
               "term": {"formatType": "METADATA"}
             },
             {
-              "term": {"event.key": "read"}
+              "term": {"event.key": event_type}
+            },
+            {
+              "term": {"inFullRobotList": "false"}
+            },
+            {
+              "exists": {
+                "field": "sessionId"
+              }
             }
           ],
           "filter": {
             "range": {
               "dateLogged": {
-                "gte": "2018-05-01T00:00:00",
-                "lte": "2018-05-31T00:00:00"
+                "gte": date_start+"T00:00:00",
+                "lte": date_end+"T00:00:00"
               }
             }
           }
         }
       },
       "aggs": {
-        "pid": {
-          "terms": {
-            "field": "pid.key",
-            "size" : 10000
-          },
-          "aggs": {
-            "robots": {
-              "terms": {
-                "field": "inFullRobotList"
+        "pid_list": {
+          "composite": {
+            "size": limit,
+            "sources": [
+              {
+                "pid": {
+                  "terms": {
+                    "field":"pid.key"
+                  }
+                }
               },
-              "aggs": {
+              {
+                "session": {
+                  "terms": {
+                    "field":"sessionId"
+                  }
+                }
+              },
+              {
                 "country": {
                   "terms": {
-                    "field": "geoip.country_code2.keyword"
-                  },
-                  "aggs": {
-                    "sessions": {
-                      "terms": {
-                        "field": "sessionId"
-                      }
-                    }
+                    "field":"geoip.country_code2.keyword"
                   }
                 }
               }
-            }
+            ]
           }
         }
       }
     }
+    if(after_record is not None):
+      search_body["aggs"]["pid_list"]["composite"]["after"] = {}
+      search_body["aggs"]["pid_list"]["composite"]["after"] = after_record
     self._L.info("Request: \n%s", json.dumps(search_body, indent=2))
     resp = self._es.search(body=search_body, request_timeout=None)
-    return(resp["aggregations"])
+    return(resp)
 
 
 
+  def iterate_composite_aggregations(self):
+    count = 0
+    total = 0
+    size = 100
+    if(count == total == 0):
+      aggregations = self.get_report_aggregations(limit=size, date_start="2018-05-01", date_end="2018-05-31")
+      count = count + size
+      total = aggregations["hits"]["total"]
+      print(total)
+    while( count < total):
+      after = aggregations["aggregations"]["pid_list"]["buckets"][-1]
+      temp = self.get_report_aggregations(date_start="2018-05-01", date_end="2018-05-31", after_record=after["key"])
+      print(after["key"])
+      if(len(temp["aggregations"]["pid_list"]["buckets"]) == 0):
+        break
+      aggregations["aggregations"]["pid_list"]["buckets"] = aggregations["aggregations"]["pid_list"]["buckets"] \
+                                                            + temp["aggregations"]["pid_list"]["buckets"]
+      count = count + size
+      print(count)
+    return aggregations
 
-# if __name__ == "__main__":
-#   md = MetricsElasticSearch()
+
+if __name__ == "__main__":
+  md = MetricsElasticSearch()
 #   # md.get_report_header("01/20/2018", "02/20/2018")
-#   md.connect()
+  md.connect()
 #   data = md.get_report_aggregations()
-#   print(json.dumps(data, indent=2))
+  data = md.iterate_composite_aggregations()
+  print(len(data["aggregations"]["pid_list"]["buckets"]))
