@@ -10,7 +10,7 @@ import sys
 import requests
 import json
 import urllib.request
-import xmltodict
+from xml.etree import ElementTree
 from datetime import datetime
 from d1_metrics.metricselasticsearch import MetricsElasticSearch
 
@@ -18,6 +18,7 @@ DEFAULT_REPORT_CONFIGURATION={
     "report_url" : "https://metrics.test.datacite.org/reports",
     "auth_token" : "",
     "report_name" : "Dataset Master Report",
+    "report_id" : datetime.today().strftime('%Y-%m-%d'),
     "release" : "RD1",
     "created_by" : "DataONE",
     "solr_query_url": "https://cn.dataone.org/cn/v2/query/solr/?"
@@ -29,11 +30,14 @@ class MetricsReporter(object):
     def __init__(self):
         self._config = DEFAULT_REPORT_CONFIGURATION
 
-    def generate_reports(self, begin_date, end_date):
+
+    def report_handler(self, begin_date, end_date):
         json_object = {}
         json_object["report-header"] = self.get_report_header(begin_date, end_date)
-        json_object["report-datasets"] = self.get_report_datasets()
-        pass
+        json_object["report-datasets"] = self.get_report_datasets(json_object)
+        with open(self._config["report_id"]+'.json', 'w') as outfile:
+            json.dump(json_object, outfile, indent=2,ensure_ascii=False)
+        # self.send_reports()
 
 
     def get_report_header(self, begin_date, end_date):
@@ -41,64 +45,96 @@ class MetricsReporter(object):
         report_header["report-name"] = self._config["report_name"]
         report_header["report-id"] = "DSR-" + datetime.today().strftime('%Y-%m-%d-%H-%M')
         report_header["release"] = self._config["release"]
-        report_header["report-filters"] = [
+        report_header["reporting-period"] = [
 			  {
-				"Name": "Begin-Date",
-				"Value": (datetime.strptime(begin_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
+				"begin-date" : (datetime.strptime(begin_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
 			  },
 			  {
-				"Name": "End-Date",
-				"Value": (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
+				"end-date" : (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
 			  }
 		]
-        report_header["created"] = datetime.today().strftime('%Y-%m-%d')
+        report_header["created"] = self._config["report_id"]
         report_header["created-by"] = self._config["created_by"]
-        print(report_header)
+        report_header["report-filters"] = []
+        report_header["report-attributes"] = []
+
+        return (report_header)
 
 
-    def get_report_datasets(self, begin_date, end_date ):
+    def get_report_datasets(self, json_object ):
         metrics_elastic_search = MetricsElasticSearch()
         metrics_elastic_search.connect()
         report_datasets = []
-        fields = ["pid", "nodeId", "inFullRobotList", "formatType", "sessionId"]
-        data, total_hits = metrics_elastic_search.getSearches(limit=10,fields=fields, date_start = datetime.strptime(begin_date,'%m/%d/%Y'), date_end = datetime.strptime(end_date,'%m/%d/%Y'))
-        total_events = []
-        unique_events = []
-        for i in data:
-            events = []
-            events.append(i["pid"])
-            events.append(i["nodeId"])
-            events.append(i["inFullRobotList"])
-            events.append(i["formatType"])
-            # events.append(i["sessionId"])
-            total_events.append(events)
-            if events not in unique_events:
-                unique_events.append(events)
+
+        aggregations = metrics_elastic_search.get_report_aggregations()
+        for pid_bucket_item in aggregations["pid"]["buckets"]:
+            dataset = {}
+            solr_response = self.query_solr(pid_bucket_item["key"])
+            if(solr_response["response"]["numFound"] > 0):
+
+                if ("dataset-title" in (i for i in solr_response["response"]["docs"][0])):
+                    dataset["dataset-title"] = solr_response["response"]["docs"][0]["title"]
+
+                if ("authoritativeMN" in (i for i in solr_response["response"]["docs"][0])):
+                    dataset["publisher"] = self.resolve_MN(solr_response["response"]["docs"][0]["authoritativeMN"])
+
+                if ("authoritativeMN" in (i for i in solr_response["response"]["docs"][0])):
+                    dataset["publisher-id"] = solr_response["response"]["docs"][0]["authoritativeMN"]
+
+                dataset["platform"] = "DataONE"
+
+                if ("origin" in (i for i in solr_response["response"]["docs"][0])):
+                    contributors = []
+                    for i in solr_response["response"]["docs"][0]["origin"]:
+                        contributors.append({"type": "Name", "value": i})
+                    dataset["contributors"] = contributors
+
+                if ("datePublished" in (i for i in solr_response["response"]["docs"][0])):
+                    dataset["dataset-dates"] = {"type": "pub-date", "value" :solr_response["response"]["docs"][0]["datePublished"][:10]}
+                else:
+                    dataset["dataset-dates"] = {"type": "pub-date", "value" :solr_response["response"]["docs"][0]["dateUploaded"][:10]}
+
+                if "doi" in pid_bucket_item["key"]:
+                    dataset["dataset-id"] = [{"DOI": pid_bucket_item["key"]}]
+                else:
+                    dataset["dataset-id"] = [{"other-id": pid_bucket_item["key"]}]
+
+                dataset["yop"] = dataset["dataset-dates"]["value"][:4]
+
+                if ("dataUrl" in (i for i in solr_response["response"]["docs"][0])):
+                    dataset["uri"] = solr_response["response"]["docs"][0]["dataUrl"]
+
+                dataset["data-type"] = "Dataset"
+
+                dataset["performance"] = {}
+
+                dataset["performance"]["reporting-period"] = json_object["report-header"]["reporting-period"]
+
+                instance = []
+                for robot_bucket_item in pid_bucket_item["robots"]["buckets"]:
+                    instance_entry = {}
+                    country_count = {}
+                    for country_bucket_item in robot_bucket_item["country"]["buckets"]:
+                        country_count[country_bucket_item["key"]] = country_bucket_item["doc_count"]
+                    instance_entry["count"] = robot_bucket_item["doc_count"]
+                    instance_entry["metric-type"] = "total-dataset-investigations"
+                    instance_entry["access-method"] = "regular" if("false" in robot_bucket_item["key_as_string"]) else "machine"
+                    instance_entry["country-counts"] = country_count
+                    instance.append(instance_entry)
 
 
+                dataset["performance"]["instance"] = instance
+
+            report_datasets.append(dataset)
+        return(report_datasets)
 
 
-
-        for i in unique_events:
-            dataset_object = {}
-            dataset_object["dataset-title"]
-            dataset_object["publisher"]
-            dataset_object["publisher-id"]
-            dataset_object["platform"]
-            dataset_object["dataset-contributors"]
-            dataset_object["dataset-dates"]
-            dataset_object["uri"]
-            dataset_object["yop"]
-            dataset_object["data-type"]
-            period_object = {
-                "end-date": end_date.strftime('%Y-%m-%d'),
-                "begin-date": end_date.strftime('%Y-%m-%d')
-            }
-            dataset_object["performance"]
-            performance_object = {}
-            performance_object["period"] = period_object
-
-
+    def resolve_MN(self, authoritativeMN):
+        node_url = "https://cn.dataone.org/cn/v2/node/" + authoritativeMN
+        resp = requests.get(node_url, stream=True)
+        root = ElementTree.fromstring(resp.content)
+        name = root.find('name').text
+        return name
 
 
 
@@ -111,7 +147,7 @@ class MetricsReporter(object):
         s = requests.session()
         s.headers.update(
             {'Authorization': f'Bearer {self._config["auth_token"]}', 'Content-Type': 'application/json', 'Accept': 'application/json'})
-        with open('metricsReport.json', 'r') as content_file:
+        with open(self._config["report_id"]+'.json', 'r') as content_file:
             content = content_file.read()
         r = s.post(self._config["report_url"], data=content.encode("utf-8"))
         print('Sending report to the hub')
@@ -128,24 +164,18 @@ class MetricsReporter(object):
         '''
         Queries the Solr end-point for metadata given the PID.
         :param PID:
-        :return: Ordered dictionary containing the metadata fields queried from Solr
+        :return: JSON Object containing the metadata fields queried from Solr
         '''
-        queryString = 'q=id:"' + PID +  '"&fl=origin,pubDate,title'
-
-        # connection = urllib.request.urlopen(self.URL+queryString)
-        # response = eval(connection.read())
-        # return response
-
-        # print(self.URL+queryString)
-
+        queryString = 'q=id:"' + PID + '"&fl=origin,title,datePublished,dateUploaded,authoritativeMN,dataUrl&wt=json'
         response = requests.get(url = self._config["solr_query_url"], params = queryString)
-        #The response is returned in XML format.
 
-        orderedDict = xmltodict.parse(response.content)
-        return orderedDict
+        return response.json()
 
 
 if __name__ == "__main__":
   md = MetricsReporter()
-  md.get_report_header("01/20/2018", "02/20/2018")
-  # md.get_report_datasets("01/01/2018", "05/31/2018")
+  # md.get_report_header("01/20/2018", "02/20/2018")
+  # md.get_report_datasets(md.get_report_header("01/20/2018", "02/20/2018"))
+  # md.resolve_MN("urn:node:KNB")
+  # md.query_solr("df35b.302.1")
+  md.report_handler("05/01/2018", "05/31/2018")
