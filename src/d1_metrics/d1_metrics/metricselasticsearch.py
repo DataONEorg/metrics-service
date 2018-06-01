@@ -743,7 +743,6 @@ class MetricsElasticSearch(object):
       self.processNewEvents(index_name, new_events, live_sessions)
       self._L.info("Processed batch %d of %d", batch_counter, total_batches)
       batch_counter += 1
-<<<<<<< HEAD
     return 1
 
 
@@ -783,7 +782,7 @@ class MetricsElasticSearch(object):
           "filter": {
             "range": {
               "dateLogged": {
-                "gte": "2018-01-01T00:00:00",
+                "gte": "2018-05-01T00:00:00",
                 "lte": "2018-05-31T00:00:00"
               }
             }
@@ -833,6 +832,3 @@ class MetricsElasticSearch(object):
 #   md.connect()
 #   data = md.get_report_aggregations()
 #   print(json.dumps(data, indent=2))
-=======
-    return 1
->>>>>>> e1477faa92b8b929a88e522ab9d62d2694372b80
