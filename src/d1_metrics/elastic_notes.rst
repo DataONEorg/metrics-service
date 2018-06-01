@@ -4,7 +4,7 @@ Setup and Operation of Elasticsearch Event Index
 Log events travel a long path to get into the elasticsearch index:
 
 1. MN or CN event
-2. Log aggregation collects event
+2. Log aggregation process running on a CN collects event
 3. Log aggregation processes event, augmenting and pushing into solr
 4. Python script copies events from solr index to log files on disk
 5. Filebeat watches log files, sends entries to logstash
@@ -130,6 +130,11 @@ Eventlog logstash pipeline::
         match => ["dateLogged","ISO8601"]
         target => "@timestamp"
       }
+      geoip {
+        source => "ipAddress"
+        tag_on_failure => ["_geoip_lookup_failure"]
+        remove_field => ["location","country","region","city"]
+      }
       mutate {
         id => "eventmutation"
       }
@@ -193,28 +198,116 @@ Template for eventlog* documents::
           "rightsHolder": {"type":"text", "fields":{"key":{"type":"keyword"}}},
           "isPublic": {"type":"boolean"},
           "subject": {"type":"text", "fields":{"key":{"type":"keyword"}}},
-          "readPermission":  {"type":"keyword"}
+          "readPermission":  {"type":"keyword"},
+          "sessionId": {"type":"long"}
         }
       }
     }
   }
 
+Note that the ``sessionId`` property is not present in eventlog entries until after Step 7 where sessions are calculated.
+
 
 Step 7. Computing Sessions
 --------------------------
 
-
+TBD.
 
 
 Example Operations
 ------------------
+
+The following provides example queries that may be exectued using the kibana interface (or using ``curl`` from the
+commandline).
+
+Show everything query
+.....................
 
 Query everything in the eventlog index::
 
   GET /eventlog-*/_search
 
 
-**Get events from the month** of May 2018 using `date range query <daterangequery_>`::
+Any event records
+.................
+
+Event records are identified with the property `beat.name`::
+
+  GET /eventlog-*/_search
+  {
+    "query": {
+      "bool": {
+        "must": [
+          {
+            "term": {"beat.name": "eventlog"}
+          }
+        ]
+      }
+    }
+  }
+
+
+Production environment ``read`` event records
+.............................................
+
+Filebeat adds the ``env`` field static value when reading the log files on the server::
+
+  GET /eventlog-*/_search
+  {
+    "query": {
+      "bool": {
+        "must": [
+          {
+            "term": {"beat.name": "eventlog"}
+          },
+          {
+            "term": {"fields.env": "production"}
+          },
+          {
+            "term": {"event.key": "read"}
+          }
+        ]
+      }
+    }
+  }
+
+
+Production metadata ``read`` event records with ``sessionId``
+.............................................................
+
+After sessions are computed, each record will have a sessionId associated with it. Metadata ``read`` events are
+considered to be views of the record::
+
+  GET /eventlog-*/_search
+  {
+    "query": {
+      "bool": {
+        "must": [
+          {
+            "term": {"beat.name": "eventlog"}
+          },
+          {
+            "term": {"fields.env": "production"}
+          },
+          {
+            "term": {"event.key": "read"}
+          },
+          {
+            "term": {"formatType": "METADATA"}
+          },
+          {
+            "exists": {"field": "sessionId"}
+          }
+        ]
+      }
+    }
+  }
+
+
+Get events from month
+.....................
+
+Get events from the month of May 2018 using `date range query <daterangequery>_`::
 
   GET /eventlog-*/_search
   {
@@ -229,6 +322,7 @@ Query everything in the eventlog index::
   }
 
 .. _daterangequery: https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-range-query.html
+
 
 
 Get **total read events for each PID for the month** of May 2018. This requires paging of the results. To do so, start with::
