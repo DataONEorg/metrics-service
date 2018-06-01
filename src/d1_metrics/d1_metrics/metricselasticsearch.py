@@ -645,13 +645,21 @@ class MetricsElasticSearch(object):
     if index is None:
       index = self._config["index"]
     search_body = {
-      "size" : 0,
+      "size": 0,
       "query": {
         "bool": {
+          "must": [
+            {
+              "term": {"formatType": "METADATA"}
+            },
+            {
+              "term": {"event.key": "read"}
+            }
+          ],
           "filter": {
             "range": {
               "dateLogged": {
-                "gte": "2018-05-20T00:00:00",
+                "gte": "2018-01-01T00:00:00",
                 "lte": "2018-05-31T00:00:00"
               }
             }
@@ -662,19 +670,24 @@ class MetricsElasticSearch(object):
         "pid": {
           "terms": {
             "field": "pid.key",
-            "size" : 100
+            "size" : 10000
           },
           "aggs": {
-            "format": {
+            "robots": {
               "terms": {
-                "field": "formatType",
-                "size" : 100
+                "field": "inFullRobotList"
               },
               "aggs": {
                 "country": {
                   "terms": {
-                    "field": "country.key",
-                    "size" : 100
+                    "field": "geoip.country_code2.keyword"
+                  },
+                  "aggs": {
+                    "sessions": {
+                      "terms": {
+                        "field": "sessionId"
+                      }
+                    }
                   }
                 }
               }
@@ -690,3 +703,9 @@ class MetricsElasticSearch(object):
 
 
 
+# if __name__ == "__main__":
+#   md = MetricsElasticSearch()
+#   # md.get_report_header("01/20/2018", "02/20/2018")
+#   md.connect()
+#   data = md.get_report_aggregations()
+#   print(json.dumps(data, indent=2))
