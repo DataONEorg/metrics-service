@@ -790,8 +790,8 @@ class MetricsElasticSearch(object):
           "filter": {
             "range": {
               "dateLogged": {
-                "gte": date_start+"T00:00:00",
-                "lte": date_end+"T00:00:00"
+                "gte": date_start.isoformat(),
+                "lte": date_end.isoformat()
               }
             }
           }
@@ -837,32 +837,28 @@ class MetricsElasticSearch(object):
 
 
 
-  def iterate_composite_aggregations(self):
+  def iterate_composite_aggregations(self, start_date, end_date):
     count = 0
     total = 0
     size = 100
     if(count == total == 0):
-      aggregations = self.get_report_aggregations(limit=size, date_start="2018-05-01", date_end="2018-05-31")
+      aggregations = self.get_report_aggregations(limit=size, date_start=start_date, date_end=end_date)
       count = count + size
       total = aggregations["hits"]["total"]
-      print(total)
     while( count < total):
       after = aggregations["aggregations"]["pid_list"]["buckets"][-1]
-      temp = self.get_report_aggregations(date_start="2018-05-01", date_end="2018-05-31", after_record=after["key"])
-      print(after["key"])
+      temp = self.get_report_aggregations(date_start=start_date, date_end=end_date, after_record=after["key"])
       if(len(temp["aggregations"]["pid_list"]["buckets"]) == 0):
         break
       aggregations["aggregations"]["pid_list"]["buckets"] = aggregations["aggregations"]["pid_list"]["buckets"] \
                                                             + temp["aggregations"]["pid_list"]["buckets"]
       count = count + size
-      print(count)
     return aggregations
 
 
-if __name__ == "__main__":
-  md = MetricsElasticSearch()
-#   # md.get_report_header("01/20/2018", "02/20/2018")
-  md.connect()
-#   data = md.get_report_aggregations()
-  data = md.iterate_composite_aggregations()
-  print(len(data["aggregations"]["pid_list"]["buckets"]))
+# if __name__ == "__main__":
+#   md = MetricsElasticSearch()
+# #   # md.get_report_header("01/20/2018", "02/20/2018")
+#   md.connect()
+# #   data = md.get_report_aggregations()
+#   data = md.iterate_composite_aggregations()
