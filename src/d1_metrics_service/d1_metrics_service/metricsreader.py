@@ -4,9 +4,14 @@ Metrics Reader module
 import json
 import falcon
 from urllib.parse import urlparse
+import requests
+from d1_metrics.metricselasticsearch import MetricsElasticSearch
+from datetime import datetime
 
-from d1_metrics.metricsdatabase import MetricsDatabase
 
+DEFAULT_REPORT_CONFIGURATION={
+    "solr_query_url": "https://cn.dataone.org/cn/v2/query/solr/?"
+}
 
 
 class MetricsReader:
@@ -17,6 +22,10 @@ class MetricsReader:
     """
     request = {}
     response = {}
+
+
+    def __init__(self):
+        self._config = DEFAULT_REPORT_CONFIGURATION
 
     def on_get(self, req, resp):
         """
@@ -68,15 +77,126 @@ class MetricsReader:
         """
         self.request = metrics_request
         self.response = metrics_request
-        metricsdb = MetricsDatabase()
         metrics_page = self.request['metricsPage']
         filter_by = self.request['filterBy']
         metrics = self.request['metrics']
         group_by = self.request['groupBy']
-
-        for items in filter_by:
-            if items['filterType'] == "dataset" and items['interpretAs'] == "list":
-                results = metricsdb.getSummaryMetricsPerDataset(items['values'])
-                self.response.update(results)
+        results = {}
+        if (len(filter_by) > 0):
+            if filter_by[0]['filterType'] == "dataset" and filter_by[0]['interpretAs'] == "list":
+                results = self.getSummaryMetricsPerDataset(filter_by[0]["values"])
+        self.response["results"] = results
 
         return self.response
+
+    def getSummaryMetricsPerDataset(self, PIDs):
+        """
+        Queries the Elastic Search and retrieves the summary metrics for a given dataset.
+        This information is used to populate the dataset landing pages,
+        :param PIDs:
+        :return:
+        """
+        metrics_elastic_search = MetricsElasticSearch(PIDs)
+        metrics_elastic_search.connect()
+        search_body = [
+            {
+                "term": {"event.key": "read"}
+            },
+            {
+                "terms": {
+                    "pid.key": self.resolvePIDs(PID=PIDs)
+                }
+
+            }
+        ]
+        aggregation_body = {
+            "pid_list": {
+                "composite": {
+                    "size": 100,
+                    "sources": [
+                        {
+                            "country": {
+                                "terms": {
+                                    "field": "geoip.country_code2.keyword"
+                                }
+                            }
+                        },
+                        {
+                            "format": {
+                                "terms": {
+                                    "field": "formatType"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+        pid = self.response["filterBy"][0]["values"]
+        self.response["filterBy"][0]["values"] = self.resolvePIDs(pid)
+        self.request["filterBy"][0]["values"] = self.response["filterBy"][0]["values"]
+
+        start_date = "01/01/2000"
+        end_date = datetime.today().strftime('%m/%d/%Y')
+
+        if(len(self.response["filterBy"]) > 1):
+            if (self.response["filterBy"][1]["filterType"] == "month" and self.response["filterBy"][1]["interpretAs"] == "range"):
+                start_date = self.response["filterBy"][1]["values"][0]
+                end_date = self.response["filterBy"][1]["values"][1]
+
+            monthObject = {
+                "month": {
+                    "date_histogram": {
+                        "field": "dateLogged",
+                        "interval":"month"
+                    }
+                }
+            }
+            aggregation_body["pid_list"]["composite"]["sources"].append(monthObject)
+        data = metrics_elastic_search.iterate_composite_aggregations(search_query=search_body,
+                                                                     aggregation_query=aggregation_body,
+                                                                     start_date=datetime.strptime(start_date,'%m/%d/%Y'),
+                                                                     end_date=datetime.strptime(end_date,'%m/%d/%Y'))
+
+        return (self.formatData(data))
+
+
+    def formatData(self, data):
+        """
+        Formats the data into the specified Swagger format
+        :param data:
+        :return:
+        """
+        return data["aggregations"]
+
+
+    def resolvePIDs(self, PID):
+        """
+        Checks for the versions and obsolecence chain of the given PID
+        :param PID:
+        :return: A list of pids for previous versions and their data + metadata objects
+        """
+        dataset_pids = []
+        obsoletes = []
+        for i in PID:
+            dataset_pids.append(i)
+            obsoletes.append(i)
+
+        # get the ids for all the previous versions and their data / metadata object till the current `pid` version
+        # p.s. this might not be the latest version!
+        for i in obsoletes:
+            queryString = 'q=id:"' + i + '"&fl=documents,obsoletes&wt=json'
+            response = requests.get(url=self._config["solr_query_url"], params=queryString).json()
+            if(response["response"]["numFound"] > 0):
+                # Checks if the pid has any data / metadata objects
+                if "documents" in response["response"]["docs"][0]:
+                    for j in response["response"]["docs"][0]["documents"]:
+                        if j not in dataset_pids:
+                            dataset_pids.append(j)
+
+                # Checks for the previous versions of the pid
+                if "obsoletes" in response["response"]["docs"][0]:
+                    dataset_pids.append(response["response"]["docs"][0]["obsoletes"])
+                    obsoletes.append(response["response"]["docs"][0]["obsoletes"])
+        # return response.json()
+        return dataset_pids
