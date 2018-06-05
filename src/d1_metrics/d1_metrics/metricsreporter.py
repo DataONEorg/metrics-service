@@ -12,6 +12,7 @@ import json
 import urllib.request
 from xml.etree import ElementTree
 from datetime import datetime
+from datetime import timedelta
 from d1_metrics.metricselasticsearch import MetricsElasticSearch
 
 DEFAULT_REPORT_CONFIGURATION={
@@ -97,7 +98,54 @@ class MetricsReporter(object):
         metrics_elastic_search = MetricsElasticSearch()
         metrics_elastic_search.connect()
         report_instances = {}
-        data = metrics_elastic_search.iterate_composite_aggregations(start_date=datetime.strptime(start_date,'%m/%d/%Y'),\
+        search_body = [
+            {
+                "term": {"formatType": "METADATA"}
+            },
+            {
+                "term": {"event.key": "read"}
+            },
+            {
+                "term": {"inFullRobotList": "false"}
+            },
+            {
+                "exists": {
+                    "field": "sessionId"
+                }
+            }
+        ]
+        aggregation_body = {
+            "pid_list": {
+                "composite": {
+                    "size": 100,
+                    "sources": [
+                        {
+                            "pid": {
+                                "terms": {
+                                    "field": "pid.key"
+                                }
+                            }
+                        },
+                        {
+                            "session": {
+                                "terms": {
+                                    "field": "sessionId"
+                                }
+                            }
+                        },
+                        {
+                            "country": {
+                                "terms": {
+                                    "field": "geoip.country_code2.keyword"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+        data = metrics_elastic_search.iterate_composite_aggregations(search_query=search_body, aggregation_query = aggregation_body,\
+                                                                     start_date=datetime.strptime(start_date,'%m/%d/%Y'),\
                                                                      end_date=datetime.strptime(end_date,'%m/%d/%Y'))
         for i in data["aggregations"]["pid_list"]["buckets"]:
             if i["key"]["pid"] in report_instances:
@@ -267,6 +315,14 @@ class MetricsReporter(object):
         return response.json()
 
 
+    def scheduler(self):
+        date = datetime(2000, 1, 1)
+        for i in range(70):
+            prevDate = date
+            date += timedelta(days=1)
+            print("Job ", i, " : ", prevDate, " to ", date)
+
+
 if __name__ == "__main__":
   md = MetricsReporter()
   # md.get_report_header("01/20/2018", "02/20/2018")
@@ -275,3 +331,4 @@ if __name__ == "__main__":
   # md.query_solr("df35b.302.1")
   md.report_handler("05/01/2018", "05/31/2018")
   # md.get_unique_pids()
+  # md.scheduler()
