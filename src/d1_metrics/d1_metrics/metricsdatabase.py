@@ -10,14 +10,14 @@ except ImportError:
 from d1_metrics import common
 from d1_metrics.metricselasticsearch import MetricsElasticSearch
 import requests
-from . import solrclient
+from d1_metrics import solrclient
 
 
 CONFIG_DATABASE_SECTION = "database"
 DEFAULT_DB_CONFIG = {
   "host":"localhost",
   "port":"5432",
-  "dbname":"ci",
+  "dbname":"metrics",
   "user":"metrics",
   "password":""
   }
@@ -279,37 +279,43 @@ class MetricsDatabase(object):
     Gets citations from the crossref end point
     :return:
     '''
-    runGetDOIs = True
-    if(runGetDOIs):
-      dois, pref =  self.getDOIs()
-    else:
-      pref = {'10.5066', '10.6085', '10.6073', '10.1575', '10.5065', '10.1873', '10.5072', '10.5063', '10.6067'}
 
-    print(len(dois))
-    # print(dois)
-    print(", ".join(pref))
-    cd = SolrClient('https://cn-ucsb-1.dataone.org/cn/v2/query', 'solr')
+    dois, pref = self.getDOIs()
+    csr = self.getCursor()
+    sql = "INSERT INTO CITATIONS(id, target_id, source_id, relation_type, source_id_Scheme, source_id_url, " +\
+          "source_type_name, source_sub_type, source_sub_type_schema, link_publication_date) values ( DEFAULT,'"
+
     count = 0
     for i in pref:
       res = requests.get("https://api.eventdata.crossref.org/v1/events/scholix?source=crossref&obj-id.prefix="+i)
       dict = res.json()
       for val in dict["message"]["link-packages"]:
-        if ("doi:" + i["Target"]["Identifier"]["ID"]) in dois:
-          count = count + 1
-          print()
-          print("Count  -> " + str(count))
-          print("Link_Publication_Date -> " + val["LinkPublicationDate"])
-          print("Target_ID -> " + val["Target"]["Identifier"]["ID"])
-          print("Source_ID -> " + val["Source"]["Identifier"]["ID"])
-          print("RelationshipType -> " + val["RelationshipType"]["Name"])
-          print("Source_ID_Scheme -> " + val["Source"]["Identifier"]["IDScheme"])
-          print("Source_ID_URL -> " + val["Source"]["Identifier"]["IDUrl"])
-          print("Source_Type_Name -> " + val["Source"]["Type"]["Name"])
-          print("Source_Type_SubType -> " + val["Source"]["Type"]["SubType"])
-          print("Source_Type_SubTypeSchema -> " + val["Source"]["Type"]["SubTypeSchema"])
-          print()
-        else:
-          pass
+        if (val["Target"]["Identifier"]["ID"] in dois):
+          try:
+            count = count + 1
+            values = []
+            values.append(val["Target"]["Identifier"]["ID"])
+            values.append(val["Source"]["Identifier"]["ID"])
+            values.append(val["RelationshipType"]["Name"])
+            values.append(val["Source"]["Identifier"]["IDScheme"])
+            values.append(val["Source"]["Identifier"]["IDUrl"])
+            values.append(val["Source"]["Type"]["Name"])
+            values.append(val["Source"]["Type"]["SubType"])
+            values.append(val["Source"]["Type"]["SubTypeSchema"])
+            values.append(val["LinkPublicationDate"])
+
+            csr.execute(sql + "','".join(values) + "');")
+            print("A new citation record inserted!")
+
+          except psycopg2.DatabaseError as e:
+            print('Database error!\n{0}' , e)
+          except psycopg2.OperationalError as e:
+            print('Operational error!\n{0}', e)
+          finally:
+            self.conn.commit()
+    print("Queries executed!")
+    return
+
 
   def getDOIs(self):
     """
