@@ -746,21 +746,22 @@ class MetricsElasticSearch(object):
     return 1
 
 
-  def get_report_aggregations(self,
+  def get_aggregations(self,
+                  date_start,
+                  date_end,
                   index=None,
-                  event_type="read",
-                  limit=100,
-                  date_start="",
-                  date_end="",
+                  query=None,
+                  aggQuery=None,
                   after_record = None):
     '''
-    Retrieve a list of session + count for each session
+    Retrieve a response for aggregations
     Args:
-      index:
-      event_type:
-      limit:
       date_start:
       date_end:
+      index:
+      query:
+      aggQuery:
+      after_record:
 
     Returns: Aggregations dictionary
 
@@ -772,20 +773,7 @@ class MetricsElasticSearch(object):
       "query": {
         "bool": {
           "must": [
-            {
-              "term": {"formatType": "METADATA"}
-            },
-            {
-              "term": {"event.key": event_type}
-            },
-            {
-              "term": {"inFullRobotList": "false"}
-            },
-            {
-              "exists": {
-                "field": "sessionId"
-              }
-            }
+
           ],
           "filter": {
             "range": {
@@ -798,36 +786,13 @@ class MetricsElasticSearch(object):
         }
       },
       "aggs": {
-        "pid_list": {
-          "composite": {
-            "size": limit,
-            "sources": [
-              {
-                "pid": {
-                  "terms": {
-                    "field":"pid.key"
-                  }
-                }
-              },
-              {
-                "session": {
-                  "terms": {
-                    "field":"sessionId"
-                  }
-                }
-              },
-              {
-                "country": {
-                  "terms": {
-                    "field":"geoip.country_code2.keyword"
-                  }
-                }
-              }
-            ]
-          }
-        }
+
       }
     }
+    if(query is not None):
+      search_body["query"]["bool"]["must"].append(query)
+    if(aggQuery is not None):
+      search_body["aggs"] = aggQuery
     if(after_record is not None):
       search_body["aggs"]["pid_list"]["composite"]["after"] = {}
       search_body["aggs"]["pid_list"]["composite"]["after"] = after_record
@@ -837,17 +802,17 @@ class MetricsElasticSearch(object):
 
 
 
-  def iterate_composite_aggregations(self, start_date, end_date):
+  def iterate_composite_aggregations(self, start_date, end_date, search_query = None, aggregation_query = None):
     count = 0
     total = 0
     size = 100
     if(count == total == 0):
-      aggregations = self.get_report_aggregations(limit=size, date_start=start_date, date_end=end_date)
+      aggregations = self.get_aggregations( query=search_query, aggQuery = aggregation_query, date_start=start_date, date_end=end_date)
       count = count + size
       total = aggregations["hits"]["total"]
     while( count < total):
       after = aggregations["aggregations"]["pid_list"]["buckets"][-1]
-      temp = self.get_report_aggregations(date_start=start_date, date_end=end_date, after_record=after["key"])
+      temp = self.get_aggregations(query=search_query, aggQuery = aggregation_query, date_start=start_date, date_end=end_date, after_record=after["key"])
       if(len(temp["aggregations"]["pid_list"]["buckets"]) == 0):
         break
       aggregations["aggregations"]["pid_list"]["buckets"] = aggregations["aggregations"]["pid_list"]["buckets"] \
