@@ -12,6 +12,7 @@ from dateutil import parser as dateparser
 from dateutil.tz import tzutc
 from pytz import timezone
 import json
+import pprint
 
 CONFIG_ELASTIC_SECTION = "elasticsearch"
 DEFAULT_ELASTIC_CONFIG = {
@@ -673,15 +674,21 @@ class MetricsElasticSearch(object):
     total_count = len(new_events["hits"]["hits"])
     for record in new_events["hits"]["hits"]:
       counter += 1
-      if counter % 50 == 0:
+      if counter % 100 == 0:
         self._L.info("%d / %d", counter, total_count)
       # check for records that failed to parse in logstash
       # and assign a sessionid of -1. This is uncommon.
       recordtags = record["_source"].get("tags")
       if ("_jsonparsefailure" in recordtags
           or "_geoip_lookup_failure" in recordtags):
-        record["_source"]["sessionid"] = -1
+        if "_jsonparsefailure" in recordtags:
+          self._L.debug("_jsonparsefailure in recordtags")
+        if "_geoip_lookup_failure" in recordtags:
+          pprint.pprint(record)
+          self._L.debug("_geoip_lookup_failure in recordtags: %s", record["_source"]["ipAddress"])
+        record["_source"]["sessionId"] = -1
         self.updateRecord(index_name, record)
+        self._L.debug("Event Session set to INVALID (-1)")
         continue
       timestamp = record["_source"].get("dateLogged")
       client_ip = record["_source"].get("ipAddress")
@@ -724,7 +731,7 @@ class MetricsElasticSearch(object):
     if index_name is None:
       index_name = self._config["index"]
     self._session_id = self.getNextSessionId(index_name)
-    batch_size = 500
+    batch_size = 1000
     batch_counter = 0
     self._es.indices.refresh(index_name)
     unprocessed_count = self.countUnprocessedEvents(index_name)
