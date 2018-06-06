@@ -260,7 +260,7 @@ class MetricsElasticSearch(object):
     search_body = self._getQueryTemplate(fields=fields, date_start=date_start, date_end=date_end)
     search_body["query"]["bool"]["must"].append({"term": { "event": event_type }})
     if not session_id is None:
-      sessionid_search = {"term": {"sessionid": session_id}}
+      sessionid_search = {"term": {"sessionId": session_id}}
       search_body["query"]["bool"]["must"].append(sessionid_search)
     return self._getQueryResults(index, search_body, limit)
 
@@ -285,7 +285,7 @@ class MetricsElasticSearch(object):
       }
     search_body["query"]["bool"]["must"].append( q )
     if not session_id is None:
-      sessionid_search = {"term": {"sessionid": session_id}}
+      sessionid_search = {"term": {"sessionId": session_id}}
       search_body["query"]["bool"]["must"].append(sessionid_search)
     return self._getQueryResults(index, search_body, limit)
 
@@ -318,7 +318,7 @@ class MetricsElasticSearch(object):
     aggregate_name = "group_by_session"
     aggregations =  {aggregate_name: {
                         "terms": {
-                          "field":"sessionid",                            #group by session id
+                          "field":"sessionId",                            #group by session id
                           "size": MetricsElasticSearch.MAX_AGGREGATIONS,  #max number of groups to return
                           "exclude": [-1,]                                #exclude terms that match values in this array
                         },
@@ -439,7 +439,7 @@ class MetricsElasticSearch(object):
           ],
           "must_not": {
             "exists": {
-              "field": "sessionid"
+              "field": "sessionId"
             }
           }
         }
@@ -502,7 +502,7 @@ class MetricsElasticSearch(object):
                     "unmapped_type": "date"
                   }
                 }],
-                "_source": {"includes": ["dateLogged", "ipAddress", "sessionid"]}
+                "_source": {"includes": ["dateLogged", "ipAddress", "sessionId"]}
               }
             }
           }
@@ -584,7 +584,7 @@ class MetricsElasticSearch(object):
             },
             {
               "exists": {
-                "field": "sessionid"
+                "field": "sessionId"
               }
             },
             {
