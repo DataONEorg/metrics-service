@@ -684,7 +684,7 @@ class MetricsElasticSearch(object):
         if "_jsonparsefailure" in recordtags:
           self._L.debug("_jsonparsefailure in recordtags")
         if "_geoip_lookup_failure" in recordtags:
-          pprint.pprint(record)
+          #pprint.pprint(record)
           self._L.debug("_geoip_lookup_failure in recordtags: %s", record["_source"]["ipAddress"])
         record["_source"]["sessionId"] = -1
         self.updateRecord(index_name, record)
