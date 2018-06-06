@@ -12,6 +12,7 @@ import json
 import urllib.request
 from xml.etree import ElementTree
 from datetime import datetime
+from datetime import timedelta
 from d1_metrics.metricselasticsearch import MetricsElasticSearch
 
 DEFAULT_REPORT_CONFIGURATION={
@@ -31,23 +32,23 @@ class MetricsReporter(object):
         self._config = DEFAULT_REPORT_CONFIGURATION
 
 
-    def report_handler(self, begin_date, end_date):
+    def report_handler(self, start_date, end_date):
         json_object = {}
-        json_object["report-header"] = self.get_report_header(begin_date, end_date)
-        json_object["report-datasets"] = self.get_report_datasets(json_object)
-        with open(self._config["report_id"]+'.json', 'w') as outfile:
+        json_object["report-header"] = self.get_report_header(start_date, end_date)
+        json_object["report-datasets"] = self.get_report_datasets(start_date, end_date)
+        with open((datetime.strptime(end_date,'%m/%d/%Y').strftime('%Y-%m-%d'))+'.json', 'w') as outfile:
             json.dump(json_object, outfile, indent=2,ensure_ascii=False)
         # self.send_reports()
 
 
-    def get_report_header(self, begin_date, end_date):
+    def get_report_header(self, start_date, end_date):
         report_header = {}
         report_header["report-name"] = self._config["report_name"]
         report_header["report-id"] = "DSR-" + datetime.today().strftime('%Y-%m-%d-%H-%M')
         report_header["release"] = self._config["release"]
         report_header["reporting-period"] = [
 			  {
-				"begin-date" : (datetime.strptime(begin_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
+				"begin-date" : (datetime.strptime(start_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
 			  },
 			  {
 				"end-date" : (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
@@ -61,22 +62,146 @@ class MetricsReporter(object):
         return (report_header)
 
 
-    def get_report_datasets(self, json_object ):
+    def get_unique_pids(self, start_date, end_date):
+        metrics_elastic_search = MetricsElasticSearch()
+        metrics_elastic_search.connect()
+        pid_list = []
+        unique_pids = ()
+        query = [
+            {
+                "term": {"formatType": "METADATA"}
+            },
+            {
+                "term": {"event.key": "read"}
+            },
+            {
+                "term": {"inFullRobotList": "false"}
+            },
+            {
+                "exists": {
+                    "field": "sessionId"
+                }
+            }
+        ]
+        fields = "pid"
+        results, total = metrics_elastic_search.getSearches(limit=1000000, q = query, date_start=datetime.strptime(start_date,'%m/%d/%Y')\
+                                                     , date_end=datetime.strptime(end_date,'%m/%d/%Y'), fields=fields)
+
+        for i in range(total):
+            pid_list.append(results[i]["pid"])
+        unique_pids = set(pid_list)
+        return unique_pids
+
+
+
+    def generate_instances(self, start_date, end_date):
+        metrics_elastic_search = MetricsElasticSearch()
+        metrics_elastic_search.connect()
+        report_instances = {}
+        search_body = [
+            {
+                "term": {"formatType": "METADATA"}
+            },
+            {
+                "term": {"event.key": "read"}
+            },
+            {
+                "term": {"inFullRobotList": "false"}
+            },
+            {
+                "exists": {
+                    "field": "sessionId"
+                }
+            }
+        ]
+        aggregation_body = {
+            "pid_list": {
+                "composite": {
+                    "size": 100,
+                    "sources": [
+                        {
+                            "pid": {
+                                "terms": {
+                                    "field": "pid.key"
+                                }
+                            }
+                        },
+                        {
+                            "session": {
+                                "terms": {
+                                    "field": "sessionId"
+                                }
+                            }
+                        },
+                        {
+                            "country": {
+                                "terms": {
+                                    "field": "geoip.country_code2.keyword"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+        data = metrics_elastic_search.iterate_composite_aggregations(search_query=search_body, aggregation_query = aggregation_body,\
+                                                                     start_date=datetime.strptime(start_date,'%m/%d/%Y'),\
+                                                                     end_date=datetime.strptime(end_date,'%m/%d/%Y'))
+        for i in data["aggregations"]["pid_list"]["buckets"]:
+            if i["key"]["pid"] in report_instances:
+                prev_total_data_investigations = report_instances[i["key"]["pid"]]["total_data_investigations"]
+                prev_unique_data_investigations = report_instances[i["key"]["pid"]]["unique_data_investigations"]
+                if i["key"]["country"] in report_instances[i["key"]["pid"]]["country_total_investigations"]:
+                    prev_country_total_investigations = report_instances[i["key"]["pid"]]["country_total_investigations"][i["key"]["country"]]
+                    prev_country_unique_investigations = \
+                    report_instances[i["key"]["pid"]]["country_unique_investigations"][i["key"]["country"]]
+                else:
+                    prev_country_total_investigations = 0
+                    prev_country_unique_investigations = 0
+                report_instances[i["key"]["pid"]] = {
+                    "total_data_investigations": prev_total_data_investigations + i["doc_count"],
+                    "unique_data_investigations": prev_unique_data_investigations + 1,
+                    "country_total_investigations": {
+                        i["key"]["country"]: prev_country_total_investigations + i["doc_count"]
+                    },
+                    "country_unique_investigations": {
+                        i["key"]["country"]: prev_country_unique_investigations + 1
+                    }
+                }
+            else:
+                report_instances[i["key"]["pid"]] = {
+                    "total_data_investigations" : i["doc_count"],
+                    "unique_data_investigations": 1,
+                    "country_total_investigations": {
+                        i["key"]["country"]: i["doc_count"]
+                    },
+                    "country_unique_investigations" : {
+                        i["key"]["country"] : 1
+                    }
+                }
+        # print(json.dumps(report_instances, indent=2))
+        return report_instances
+
+
+
+    def get_report_datasets(self, start_date, end_date ):
         metrics_elastic_search = MetricsElasticSearch()
         metrics_elastic_search.connect()
         report_datasets = []
 
-        aggregations = metrics_elastic_search.get_report_aggregations()
-        for pid_bucket_item in aggregations["pid"]["buckets"]:
+        unique_pids = self.get_unique_pids(start_date, end_date)
+        report_instances = self.generate_instances(start_date, end_date)
+        count = 0
+        for pid in unique_pids:
             dataset = {}
-            solr_response = self.query_solr(pid_bucket_item["key"])
+            solr_response = self.query_solr(pid)
             if(solr_response["response"]["numFound"] > 0):
 
                 if ("dataset-title" in (i for i in solr_response["response"]["docs"][0])):
                     dataset["dataset-title"] = solr_response["response"]["docs"][0]["title"]
 
                 if ("authoritativeMN" in (i for i in solr_response["response"]["docs"][0])):
-                    dataset["publisher"] = self.resolve_MN(solr_response["response"]["docs"][0]["authoritativeMN"])
+                    dataset["publisher"] = {"type":"https://cn.dataone.org/cn/v2/node/", "value" :self.resolve_MN(solr_response["response"]["docs"][0]["authoritativeMN"])}
 
                 if ("authoritativeMN" in (i for i in solr_response["response"]["docs"][0])):
                     dataset["publisher-id"] = solr_response["response"]["docs"][0]["authoritativeMN"]
@@ -94,10 +219,10 @@ class MetricsReporter(object):
                 else:
                     dataset["dataset-dates"] = {"type": "pub-date", "value" :solr_response["response"]["docs"][0]["dateUploaded"][:10]}
 
-                if "doi" in pid_bucket_item["key"]:
-                    dataset["dataset-id"] = [{"DOI": pid_bucket_item["key"]}]
+                if "doi" in pid:
+                    dataset["dataset-id"] = [{"DOI": pid}]
                 else:
-                    dataset["dataset-id"] = [{"other-id": pid_bucket_item["key"]}]
+                    dataset["dataset-id"] = [{"other-id": pid}]
 
                 dataset["yop"] = dataset["dataset-dates"]["value"][:4]
 
@@ -106,27 +231,45 @@ class MetricsReporter(object):
 
                 dataset["data-type"] = "Dataset"
 
+                dataset["access-type"] = "regular"
+
                 dataset["performance"] = {}
 
-                dataset["performance"]["reporting-period"] = json_object["report-header"]["reporting-period"]
+                dataset["performance"]["reporting-period"] = [
+                      {
+                        "begin-date" : (datetime.strptime(start_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
+                      },
+                      {
+                        "end-date" : (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
+                      }
+                ]
 
                 instance = []
-                for robot_bucket_item in pid_bucket_item["robots"]["buckets"]:
-                    instance_entry = {}
-                    country_count = {}
-                    for country_bucket_item in robot_bucket_item["country"]["buckets"]:
-                        country_count[country_bucket_item["key"]] = country_bucket_item["doc_count"]
-                    instance_entry["count"] = robot_bucket_item["doc_count"]
-                    instance_entry["metric-type"] = "total-dataset-investigations"
-                    instance_entry["access-method"] = "regular" if("false" in robot_bucket_item["key_as_string"]) else "machine"
-                    instance_entry["country-counts"] = country_count
-                    instance.append(instance_entry)
+
+                if pid in report_instances:
+                    total_dataset_investigation = {"count": report_instances[pid]["total_data_investigations"],
+                                                   "metric-type": "total-dataset-investigations",
+                                                   "country-counts": report_instances[pid][
+                                                       "country_total_investigations"]}
+
+                    unique_dataset_investigation = {"count": report_instances[pid]["unique_data_investigations"],
+                                                    "metric-type": "unique-dataset-investigations",
+                                                    "country-counts": report_instances[pid][
+                                                        "country_unique_investigations"]}
+
+                    instance.append(total_dataset_investigation)
+                    instance.append(unique_dataset_investigation)
+
+                    dataset["performance"]["instance"] = instance
+                else:
+                    count = count + 1
+                    print(count, " : ", pid)
+                    print()
 
 
-                dataset["performance"]["instance"] = instance
 
             report_datasets.append(dataset)
-        return(report_datasets)
+        return (report_datasets)
 
 
     def resolve_MN(self, authoritativeMN):
@@ -172,10 +315,20 @@ class MetricsReporter(object):
         return response.json()
 
 
+    def scheduler(self):
+        date = datetime(2000, 1, 1)
+        for i in range(70):
+            prevDate = date
+            date += timedelta(days=1)
+            print("Job ", i, " : ", prevDate, " to ", date)
+
+
 if __name__ == "__main__":
   md = MetricsReporter()
   # md.get_report_header("01/20/2018", "02/20/2018")
-  # md.get_report_datasets(md.get_report_header("01/20/2018", "02/20/2018"))
+  # md.get_report_datasets("05/01/2018", "05/31/2018")
   # md.resolve_MN("urn:node:KNB")
   # md.query_solr("df35b.302.1")
   md.report_handler("05/01/2018", "05/31/2018")
+  # md.get_unique_pids()
+  # md.scheduler()

@@ -715,8 +715,7 @@ class MetricsElasticSearch(object):
 
 
   def computeSessions(self,
-                      index_name=None,
-                      dry_run=False):
+                      index_name=None):
     es_logger = logging.getLogger('elasticsearch')
     es_logger.propagate = False
     es_logger.setLevel(logging.WARNING)
@@ -731,13 +730,11 @@ class MetricsElasticSearch(object):
     self._L.info("Unprocessed events = %d", unprocessed_count)
     total_batches = unprocessed_count / batch_size + bool(unprocessed_count % batch_size)
     self._L.info("Number of batches = %d at %d per batch", total_batches, batch_size)
-    if dry_run:
-      return 0
+    #return
     while True:
       self._es.indices.refresh(index_name)
       mark = self.getFirstUnprocessedEventDatetime(index_name)
       if mark is None:
-        self._L.info("No mark found by getFirstUnprocessedEventDatetime.")
         return 0
       self._L.info("At mark: %s", mark.isoformat())
       live_sessions = self.getLiveSessionsBeforeMark(index_name, mark)
@@ -749,23 +746,24 @@ class MetricsElasticSearch(object):
     return 1
 
 
-  def get_report_aggregations(self,
+  def get_aggregations(self,
+                  date_start,
+                  date_end,
                   index=None,
-                  event_type="read",
-                  limit=10,
-                  date_start=None,
-                  date_end=None,
-                  min_aggs=1):
+                  query=None,
+                  aggQuery=None,
+                  after_record = None):
     '''
-    Retrieve a list of session + count for each session
+    Retrieve a response for aggregations
     Args:
-      index:
-      event_type:
-      limit:
       date_start:
       date_end:
+      index:
+      query:
+      aggQuery:
+      after_record:
 
-    Returns:
+    Returns: Aggregations dictionary
 
     '''
     if index is None:
@@ -775,63 +773,57 @@ class MetricsElasticSearch(object):
       "query": {
         "bool": {
           "must": [
-            {
-              "term": {"formatType": "METADATA"}
-            },
-            {
-              "term": {"event.key": "read"}
-            }
+
           ],
           "filter": {
             "range": {
               "dateLogged": {
-                "gte": "2018-01-01T00:00:00",
-                "lte": "2018-05-31T00:00:00"
+                "gte": date_start.isoformat(),
+                "lte": date_end.isoformat()
               }
             }
           }
         }
       },
       "aggs": {
-        "pid": {
-          "terms": {
-            "field": "pid.key",
-            "size" : 10000
-          },
-          "aggs": {
-            "robots": {
-              "terms": {
-                "field": "inFullRobotList"
-              },
-              "aggs": {
-                "country": {
-                  "terms": {
-                    "field": "geoip.country_code2.keyword"
-                  },
-                  "aggs": {
-                    "sessions": {
-                      "terms": {
-                        "field": "sessionId"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
+
       }
     }
+    if(query is not None):
+      search_body["query"]["bool"]["must"].append(query)
+    if(aggQuery is not None):
+      search_body["aggs"] = aggQuery
+    if(after_record is not None):
+      search_body["aggs"]["pid_list"]["composite"]["after"] = {}
+      search_body["aggs"]["pid_list"]["composite"]["after"] = after_record
     self._L.info("Request: \n%s", json.dumps(search_body, indent=2))
     resp = self._es.search(body=search_body, request_timeout=None)
-    return(resp["aggregations"])
+    return(resp)
 
 
+
+  def iterate_composite_aggregations(self, start_date, end_date, search_query = None, aggregation_query = None):
+    count = 0
+    total = 0
+    size = 100
+    if(count == total == 0):
+      aggregations = self.get_aggregations( query=search_query, aggQuery = aggregation_query, date_start=start_date, date_end=end_date)
+      count = count + size
+      total = aggregations["hits"]["total"]
+    while( count < total):
+      after = aggregations["aggregations"]["pid_list"]["buckets"][-1]
+      temp = self.get_aggregations(query=search_query, aggQuery = aggregation_query, date_start=start_date, date_end=end_date, after_record=after["key"])
+      if(len(temp["aggregations"]["pid_list"]["buckets"]) == 0):
+        break
+      aggregations["aggregations"]["pid_list"]["buckets"] = aggregations["aggregations"]["pid_list"]["buckets"] \
+                                                            + temp["aggregations"]["pid_list"]["buckets"]
+      count = count + size
+    return aggregations
 
 
 # if __name__ == "__main__":
 #   md = MetricsElasticSearch()
-#   # md.get_report_header("01/20/2018", "02/20/2018")
+# #   # md.get_report_header("01/20/2018", "02/20/2018")
 #   md.connect()
-#   data = md.get_report_aggregations()
-#   print(json.dumps(data, indent=2))
+# #   data = md.get_report_aggregations()
+#   data = md.iterate_composite_aggregations()
