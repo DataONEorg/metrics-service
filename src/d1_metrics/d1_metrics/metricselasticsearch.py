@@ -715,7 +715,8 @@ class MetricsElasticSearch(object):
 
 
   def computeSessions(self,
-                      index_name=None):
+                      index_name=None,
+                      dry_run=False):
     es_logger = logging.getLogger('elasticsearch')
     es_logger.propagate = False
     es_logger.setLevel(logging.WARNING)
@@ -730,7 +731,8 @@ class MetricsElasticSearch(object):
     self._L.info("Unprocessed events = %d", unprocessed_count)
     total_batches = unprocessed_count / batch_size + bool(unprocessed_count % batch_size)
     self._L.info("Number of batches = %d at %d per batch", total_batches, batch_size)
-    #return
+    if dry_run:
+      return 0
     while True:
       self._es.indices.refresh(index_name)
       mark = self.getFirstUnprocessedEventDatetime(index_name)
