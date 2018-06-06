@@ -165,7 +165,7 @@ def esComputeSessions(args):
   _L = logging.getLogger(sys._getframe().f_code.co_name + "()")
   elastic = metricselasticsearch.MetricsElasticSearch(args.config)
   elastic.connect()
-  elastic.computeSessions()
+  elastic.computeSessions(dry_run=args.dryrun)
 
 
 def main():
@@ -206,6 +206,9 @@ def main():
   parser.add_argument("-m","--minaggs",
                       default=1,
                       help="Minimum number of aggregatd values in sessions to return (1)")
+  parser.add_argument("-Y","--dryrun",
+                      action="store_true",
+                      help="Dry run - don't make any changes.")
   parser.add_argument('command',
                       nargs='?',
                       default="check",
