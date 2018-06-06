@@ -4,6 +4,7 @@ Metrics Reader module
 import json
 import falcon
 from urllib.parse import urlparse
+from urllib.parse import unquote
 import requests
 from d1_metrics.metricselasticsearch import MetricsElasticSearch
 from datetime import datetime
@@ -37,11 +38,11 @@ class MetricsReader:
 
         #taking query parametrs from the HTTP GET request and forming metricsRequest Object
         metrics_request = {}
-        query_param = urlparse(req.url)
+        query_param = urlparse(unquote(req.url))
 
-        for i in query_param.query.split("&"):
-            query = i.split(":")
-            metrics_request[query[0]] = ":".join(query[1:])
+
+
+        metrics_request = json.loads((query_param.query).split("=")[1])
 
 
         resp.body = json.dumps(self.process_request(metrics_request), ensure_ascii=False)
