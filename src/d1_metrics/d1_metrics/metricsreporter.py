@@ -90,7 +90,7 @@ class MetricsReporter(object):
         for i in range(total):
             pid_list.append(results[i]["pid"])
         unique_pids = set(pid_list)
-        return unique_pids
+        print( unique_pids)
 
 
 
@@ -201,10 +201,10 @@ class MetricsReporter(object):
                     dataset["dataset-title"] = solr_response["response"]["docs"][0]["title"]
 
                 if ("authoritativeMN" in (i for i in solr_response["response"]["docs"][0])):
-                    dataset["publisher"] = {"type":"https://cn.dataone.org/cn/v2/node/", "value" :self.resolve_MN(solr_response["response"]["docs"][0]["authoritativeMN"])}
+                    dataset["publisher"] = self.resolve_MN(solr_response["response"]["docs"][0]["authoritativeMN"])
 
                 if ("authoritativeMN" in (i for i in solr_response["response"]["docs"][0])):
-                    dataset["publisher-id"] = solr_response["response"]["docs"][0]["authoritativeMN"]
+                    dataset["publisher-id"] = {"type":"https://cn.dataone.org/cn/v2/node/", "value" :solr_response["response"]["docs"][0]["authoritativeMN"]}
 
                 dataset["platform"] = "DataONE"
 
@@ -329,6 +329,6 @@ if __name__ == "__main__":
   # md.get_report_datasets("05/01/2018", "05/31/2018")
   # md.resolve_MN("urn:node:KNB")
   # md.query_solr("df35b.302.1")
-  md.report_handler("05/01/2018", "05/31/2018")
-  # md.get_unique_pids()
+  # md.report_handler("05/01/2018", "05/31/2018")
+  md.get_unique_pids("05/01/2018", "05/31/2018")
   # md.scheduler()

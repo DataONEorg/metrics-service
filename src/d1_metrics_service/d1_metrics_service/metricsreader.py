@@ -4,6 +4,7 @@ Metrics Reader module
 import json
 import falcon
 from urllib.parse import urlparse
+from urllib.parse import unquote
 import requests
 from d1_metrics.metricselasticsearch import MetricsElasticSearch
 from datetime import datetime
@@ -37,11 +38,11 @@ class MetricsReader:
 
         #taking query parametrs from the HTTP GET request and forming metricsRequest Object
         metrics_request = {}
-        query_param = urlparse(req.url)
+        query_param = urlparse(unquote(req.url))
 
-        for i in query_param.query.split("&"):
-            query = i.split(":")
-            metrics_request[query[0]] = ":".join(query[1:])
+
+
+        metrics_request = json.loads((query_param.query).split("=")[1])
 
 
         resp.body = json.dumps(self.process_request(metrics_request), ensure_ascii=False)
@@ -104,7 +105,7 @@ class MetricsReader:
             },
             {
                 "terms": {
-                    "pid.key": self.resolvePIDs(PID=PIDs)
+                    "pid.key": self.resolvePIDs(PIDs=PIDs)
                 }
 
             }
@@ -133,7 +134,7 @@ class MetricsReader:
             }
         }
         pid = self.response["filterBy"][0]["values"]
-        self.response["filterBy"][0]["values"] = self.resolvePIDs(pid)
+        self.response["filterBy"][0]["values"] = self.resolvePIDs(PIDs=pid)
         self.request["filterBy"][0]["values"] = self.response["filterBy"][0]["values"]
 
         start_date = "01/01/2000"
@@ -170,33 +171,28 @@ class MetricsReader:
         return data["aggregations"]
 
 
-    def resolvePIDs(self, PID):
+    def resolvePIDs(self, PIDs):
         """
         Checks for the versions and obsolecence chain of the given PID
         :param PID:
         :return: A list of pids for previous versions and their data + metadata objects
         """
-        dataset_pids = []
-        obsoletes = []
-        for i in PID:
-            dataset_pids.append(i)
-            obsoletes.append(i)
 
         # get the ids for all the previous versions and their data / metadata object till the current `pid` version
         # p.s. this might not be the latest version!
-        for i in obsoletes:
+        for i in PIDs:
             queryString = 'q=id:"' + i + '"&fl=documents,obsoletes&wt=json'
             response = requests.get(url=self._config["solr_query_url"], params=queryString).json()
             if(response["response"]["numFound"] > 0):
                 # Checks if the pid has any data / metadata objects
                 if "documents" in response["response"]["docs"][0]:
                     for j in response["response"]["docs"][0]["documents"]:
-                        if j not in dataset_pids:
-                            dataset_pids.append(j)
+                        if j not in PIDs:
+                            PIDs.append(j)
 
                 # Checks for the previous versions of the pid
                 if "obsoletes" in response["response"]["docs"][0]:
-                    dataset_pids.append(response["response"]["docs"][0]["obsoletes"])
-                    obsoletes.append(response["response"]["docs"][0]["obsoletes"])
+                    if response["response"]["docs"][0]["obsoletes"] not in PIDs:
+                        PIDs.append(response["response"]["docs"][0]["obsoletes"])
         # return response.json()
-        return dataset_pids
+        return PIDs
