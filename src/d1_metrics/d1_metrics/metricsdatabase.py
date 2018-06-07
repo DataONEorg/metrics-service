@@ -277,7 +277,7 @@ class MetricsDatabase(object):
   def getCitations(self):
     '''
     Gets citations from the crossref end point
-    :return:
+    :return: None. Saves the citations in the Citation table of the MDC database
     '''
 
     dois, pref = self.getDOIs()
@@ -336,6 +336,6 @@ class MetricsDatabase(object):
 
 
 
-if __name__ == "__main__":
-  md = MetricsDatabase()
-  md.getCitations()
+# if __name__ == "__main__":
+#   md = MetricsDatabase()
+#   md.getCitations()
