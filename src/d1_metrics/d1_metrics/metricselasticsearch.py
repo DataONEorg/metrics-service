@@ -27,9 +27,12 @@ class MetricsElasticSearch(object):
   '''
 
   MAX_AGGREGATIONS = 999999999 #get them all...
+  BATCH_SIZE = 1000
   SESSION_TTL_MINUTES = 60
+  F_SESSIONID = "sessionId"
 
-  def __init__(self, config_file=None):
+
+  def __init__(self, config_file=None, index_name=None):
     self._L = logging.getLogger(self.__class__.__name__)
     self._es = None
     self._config = DEFAULT_ELASTIC_CONFIG
@@ -37,6 +40,10 @@ class MetricsElasticSearch(object):
       self.loadConfig(config_file)
     self._session_id = None
     self._doc_type = "doc"
+    self._beatname = "eventlog"
+    if index_name is not None:
+      self._L.info("Overriding index name with %s", index_name)
+      self._config["index"] = index_name
 
 
   def _scan(self, query=None, scroll='5m', raise_on_error=True,
@@ -150,6 +157,11 @@ class MetricsElasticSearch(object):
     return self._config
 
 
+  @property
+  def indexname(self):
+    return self._config["index"]
+
+
   def connect(self, force_reconnect=False):
     '''
     Connect to the ElasticSearch server
@@ -202,7 +214,7 @@ class MetricsElasticSearch(object):
         "bool": {
           "must": [
             {
-              "term": { "beat.name": "eventlog" }
+              "term": { "beat.name": self._beatname }
             },
           ]
         }
@@ -212,7 +224,7 @@ class MetricsElasticSearch(object):
       entry = {"term": { "formatType": formatTypes } }
       search_body["query"]["bool"]["must"].append(entry)
     if session_required:
-      entry = {"exists": {"field": "sessionId"} }
+      entry = {"exists": {"field": MetricsElasticSearch.F_SESSIONID } }
       search_body["query"]["bool"]["must"].append(entry)
     if not fields is None:
       search_body["_source"] = fields
@@ -256,11 +268,11 @@ class MetricsElasticSearch(object):
                 date_end=None,
                 fields=None):
     if index is None:
-      index = self._config["index"]
+      index = self.indexname
     search_body = self._getQueryTemplate(fields=fields, date_start=date_start, date_end=date_end)
     search_body["query"]["bool"]["must"].append({"term": { "event": event_type }})
     if not session_id is None:
-      sessionid_search = {"term": {"sessionId": session_id}}
+      sessionid_search = {"term": {MetricsElasticSearch.F_SESSIONID: session_id}}
       search_body["query"]["bool"]["must"].append(sessionid_search)
     return self._getQueryResults(index, search_body, limit)
 
@@ -274,7 +286,7 @@ class MetricsElasticSearch(object):
                   date_end=None,
                   fields=None):
     if index is None:
-      index = self._config["index"]
+      index = self.indexname
     search_body = self._getQueryTemplate(fields=fields, date_start=date_start, date_end=date_end)
     if q is None:
       q = {
@@ -285,7 +297,7 @@ class MetricsElasticSearch(object):
       }
     search_body["query"]["bool"]["must"].append( q )
     if not session_id is None:
-      sessionid_search = {"term": {"sessionId": session_id}}
+      sessionid_search = {"term": {MetricsElasticSearch.F_SESSIONID: session_id}}
       search_body["query"]["bool"]["must"].append(sessionid_search)
     return self._getQueryResults(index, search_body, limit)
 
@@ -310,7 +322,7 @@ class MetricsElasticSearch(object):
 
     '''
     if index is None:
-      index = self._config["index"]
+      index = self.indexname
     search_body = self._getQueryTemplate(date_start=date_start, date_end=date_end)
     search_body["size"] = 0 #don't return any hits
     if event_type is not None:
@@ -318,7 +330,7 @@ class MetricsElasticSearch(object):
     aggregate_name = "group_by_session"
     aggregations =  {aggregate_name: {
                         "terms": {
-                          "field":"sessionId",                            #group by session id
+                          "field":MetricsElasticSearch.F_SESSIONID,                            #group by session id
                           "size": MetricsElasticSearch.MAX_AGGREGATIONS,  #max number of groups to return
                           "exclude": [-1,]                                #exclude terms that match values in this array
                         },
@@ -352,7 +364,7 @@ class MetricsElasticSearch(object):
     return results, naggregates
 
 
-  def countUnprocessedEvents(self, index_name):
+  def countUnprocessedEvents(self, index_name=None):
     '''
     Count the number of events that have no sessionId.
 
@@ -369,7 +381,7 @@ class MetricsElasticSearch(object):
         "bool": {
           "must": [
             {
-              "term": {"beat.name": "eventlog"}
+              "term": {"beat.name": self._beatname}
             },
             {
               "term": {"event.key": "read"}
@@ -377,12 +389,14 @@ class MetricsElasticSearch(object):
           ],
           "must_not": {
             "exists": {
-              "field": "sessionId"
+              "field": MetricsElasticSearch.F_SESSIONID
             }
           }
         }
       }
     }
+    if index_name is None:
+      index_name = self.indexname
     try:
       results = self._es.search(index=index_name, body=search_body)
       count = results["hits"]["total"]
@@ -394,7 +408,7 @@ class MetricsElasticSearch(object):
     return 0
 
 
-  def getNextSessionId(self, index_name):
+  def getNextSessionId(self, index_name=None):
     '''
     Generator for sessionIds.
 
@@ -410,11 +424,13 @@ class MetricsElasticSearch(object):
       "aggs": {
         "max_id": {
           "max": {
-            "field": "sessionId"
+            "field": MetricsElasticSearch.F_SESSIONID
           }
         }
       }
     }
+    if index_name is None:
+      index_name = self.indexname
     results = self._es.search(index=index_name, body=search_body)
     last_session_id = results["aggregations"]["max_id"]["value"] or 0
     next_session_id = int(last_session_id)
@@ -424,14 +440,14 @@ class MetricsElasticSearch(object):
       yield next_session_id
 
 
-  def getFirstUnprocessedEventDatetime(self, index_name):
+  def getFirstUnprocessedEventDatetime(self, index_name=None):
     search_body = {
       "from": 0, "size": 0,
       "query": {
         "bool": {
           "must": [
             {
-              "term": {"beat.name": "eventlog"}
+              "term": {"beat.name": self._beatname}
             },
             {
               "term": {"event.key": "read"}
@@ -439,7 +455,7 @@ class MetricsElasticSearch(object):
           ],
           "must_not": {
             "exists": {
-              "field": "sessionId"
+              "field": MetricsElasticSearch.F_SESSIONID
             }
           }
         }
@@ -452,6 +468,8 @@ class MetricsElasticSearch(object):
         }
       }
     }
+    if index_name is None:
+      index_name = self.indexname
     try:
       results = self._es.search(index=index_name, body=search_body)
       esvalue = results["aggregations"]["min_timestamp"]["value"] or None
@@ -471,7 +489,7 @@ class MetricsElasticSearch(object):
         "bool": {
           "must": [
             {
-              "term": {"beat.name": "eventlog"}
+              "term": {"beat.name": self._beatname}
             },
             {
               "term":{"event.key": "read"}
@@ -502,7 +520,7 @@ class MetricsElasticSearch(object):
                     "unmapped_type": "date"
                   }
                 }],
-                "_source": {"includes": ["dateLogged", "ipAddress", "sessionId"]}
+                "_source": {"includes": ["dateLogged", "ipAddress", MetricsElasticSearch.F_SESSIONID]}
               }
             }
           }
@@ -516,8 +534,10 @@ class MetricsElasticSearch(object):
     return search_body
 
 
-  def getLiveSessionsBeforeMark(self, index_name, mark):
+  def getLiveSessionsBeforeMark(self, index_name=None, mark=None):
     live_sessions = {}
+    if index_name is None:
+      index_name = self.indexname
     search_body = self.getLiveSessionsSearchBody( mark )
     self._L.debug(json.dumps(search_body, indent=2))
     results = self._es.search(index=index_name, body=search_body)
@@ -526,21 +546,23 @@ class MetricsElasticSearch(object):
       record = item["group_docs"]["hits"]["hits"][0]["_source"]
       time_stamp = record.get("dateLoged")
       client_ip = record.get("ipAddress")
-      session_id = record.get("sessionId")
+      session_id = record.get(MetricsElasticSearch.F_SESSIONID)
       live_sessions[client_ip] = {}
       live_sessions[client_ip]["timestamp"] = time_stamp
-      live_sessions[client_ip]["sessionId"] = session_id
+      live_sessions[client_ip][MetricsElasticSearch.F_SESSIONID] = session_id
     return live_sessions
 
 
-  def getNewEvents(self, index_name, batch_size):
+  def getNewEvents(self, index_name=None, batch_size=BATCH_SIZE):
+    if index_name is None:
+      index_name = self.indexname
     search_body = {
       "from": 0, "size": batch_size,
       "query": {
         "bool": {
           "must": [
             {
-              "term": {"beat.name": "eventlog"}
+              "term": {"beat.name": self._beatname}
             },
             {
               "term":{"event.key": "read"}
@@ -548,7 +570,7 @@ class MetricsElasticSearch(object):
           ],
           "must_not": {
             "exists": {
-              "field": "sessionId"
+              "field": MetricsElasticSearch.F_SESSIONID
             }
           }
         }
@@ -570,21 +592,23 @@ class MetricsElasticSearch(object):
     return None
 
 
-  def getLastProcessedEventDatetimeByIp(self, index_name, client_ip):
+  def getLastProcessedEventDatetimeByIp(self, index_name=None, client_ip=None):
+    if index_name is None:
+      index_name = self.indexname
     search_body = {
       "from": 0, "size": 0,
       "query": {
         "bool": {
           "must": [
             {
-              "term": {"beat.name": "eventlog"}
+              "term": {"beat.name": self._beatname}
             },
             {
               "term":{"event.key": "read"}
             },
             {
               "exists": {
-                "field": "sessionId"
+                "field": MetricsElasticSearch.F_SESSIONID
               }
             },
             {
@@ -618,26 +642,28 @@ class MetricsElasticSearch(object):
     return None
 
 
-  def removeStaleSessionIds(self, index_name, client_ip, time_stamp):
+  def removeStaleSessionIds(self, index_name=None, client_ip=None, time_stamp=None):
+    if index_name is None:
+      index_name = self.indexname
     search_body = {
       "script": {
-        "inline": "ctx._source.remove(\"sessionId\")",
+        "inline": "ctx._source.remove(\"" + MetricsElasticSearch.F_SESSIONID + "\")",
         "lang": "painless"
       },
       "query": {
         "bool": {
           "must": [
             {
-              "term": {"beat.name": "eventlog"}
+              "term": {"beat.name": self._beatname}
             },
             {
               "exists": {
-                "field": "sessionId"
+                "field": MetricsElasticSearch.F_SESSIONID
               }
             },
             {
               "range": {
-                "sessionId": {"gt": 0}
+                MetricsElasticSearch.F_SESSIONID: {"gt": 0}
               }
             },
             {
@@ -669,7 +695,9 @@ class MetricsElasticSearch(object):
                     body={"doc": record["_source"]})
 
 
-  def processNewEvents(self, index_name, new_events, live_sessions):
+  def _processNewEvents(self, index_name=None, new_events=[], live_sessions=[]):
+    if index_name is None:
+      index_name = self.indexname
     counter = 0
     total_count = len(new_events["hits"]["hits"])
     for record in new_events["hits"]["hits"]:
@@ -686,7 +714,7 @@ class MetricsElasticSearch(object):
         if "_geoip_lookup_failure" in recordtags:
           #pprint.pprint(record)
           self._L.debug("_geoip_lookup_failure in recordtags: %s", record["_source"]["ipAddress"])
-        record["_source"]["sessionId"] = -1
+        record["_source"][MetricsElasticSearch.F_SESSIONID] = -1
         self.updateRecord(index_name, record)
         self._L.debug("Event Session set to INVALID (-1)")
         continue
@@ -703,16 +731,21 @@ class MetricsElasticSearch(object):
       session = live_sessions.get(client_ip)
       if session is None:
         live_sessions[client_ip] = {}
-        live_sessions[client_ip]["sessionId"] = next(self._session_id)
+        live_sessions[client_ip][MetricsElasticSearch.F_SESSIONID] = next(self._session_id)
         live_sessions[client_ip]["timestamp"] = timestamp
         session = live_sessions[client_ip]
 
-      delta = dateparser.parse(timestamp) - dateparser.parse(session["timestamp"])
+      try:
+        delta = dateparser.parse(timestamp) - dateparser.parse(session["timestamp"])
+      except TypeError as e:
+        self._L.error("Session structure: %s", pprint.pformat(session))
+        self._L.error(e)
+        raise(e)
       if ((delta.total_seconds() / 60 ) > MetricsElasticSearch.SESSION_TTL_MINUTES):
-        live_sessions[client_ip]["sessionId"] = next(self._session_id)
+        live_sessions[client_ip][MetricsElasticSearch.F_SESSIONID] = next(self._session_id)
 
       session["timestamp"] = timestamp
-      record["_source"]["sessionId"] = session["sessionId"]
+      record["_source"][MetricsElasticSearch.F_SESSIONID] = session[MetricsElasticSearch.F_SESSIONID]
 
       request = record["_source"].get("request", "")
       if request.startswith("/cn/v2/query/solr/"):
@@ -727,9 +760,8 @@ class MetricsElasticSearch(object):
     es_logger = logging.getLogger('elasticsearch')
     es_logger.propagate = False
     es_logger.setLevel(logging.WARNING)
-
     if index_name is None:
-      index_name = self._config["index"]
+      index_name = self.indexname
     self._session_id = self.getNextSessionId(index_name)
     batch_size = 1000
     batch_counter = 0
@@ -749,7 +781,7 @@ class MetricsElasticSearch(object):
       live_sessions = self.getLiveSessionsBeforeMark(index_name, mark)
       self._L.debug(json.dumps(live_sessions))
       new_events = self.getNewEvents(index_name, batch_size)
-      self.processNewEvents(index_name, new_events, live_sessions)
+      self._processNewEvents(index_name, new_events, live_sessions)
       self._L.info("Processed batch %d of %d", batch_counter, total_batches)
       batch_counter += 1
     return 1
@@ -776,7 +808,7 @@ class MetricsElasticSearch(object):
 
     '''
     if index is None:
-      index = self._config["index"]
+      index = self.indexname
     search_body = {
       "size": 0,
       "query": {
