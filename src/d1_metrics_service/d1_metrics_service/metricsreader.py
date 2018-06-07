@@ -40,13 +40,12 @@ class MetricsReader:
         #taking query parametrs from the HTTP GET request and forming metricsRequest Object
         metrics_request = {}
         query_param = urlparse(unquote(req.url))
-
-
-
-        metrics_request = json.loads((query_param.query).split("=")[1])
-
-
-        resp.body = json.dumps(self.process_request(metrics_request), ensure_ascii=False)
+        print(query_param)
+        if ("=" in query_param.query):
+            metrics_request = json.loads((query_param.query).split("=")[1])
+            resp.body = json.dumps(self.process_request(metrics_request), ensure_ascii=False)
+        else:
+            resp.body = json.dumps(metrics_request, ensure_ascii=False)
 
         # The following line can be omitted because 200 is the default
         # status returned by the framework, but it is included here to
