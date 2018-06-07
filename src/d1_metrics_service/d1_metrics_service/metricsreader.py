@@ -59,7 +59,9 @@ class MetricsReader:
         :param resp: HTTP Response object
         :return: HTTP Response object
         """
-        metrics_request = json.loads(req.stream.read())
+        request_string = req.stream.read().decode('utf8')
+
+        metrics_request = json.loads(request_string)
 
         resp.body = json.dumps(self.process_request(metrics_request), ensure_ascii=False)
 
