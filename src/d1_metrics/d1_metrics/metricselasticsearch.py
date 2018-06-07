@@ -30,6 +30,8 @@ class MetricsElasticSearch(object):
   BATCH_SIZE = 1000
   SESSION_TTL_MINUTES = 60
   F_SESSIONID = "sessionId"
+  F_DATELOGGED = "dateLogged"
+  F_IPADDR = "ipAddress"
 
 
   def __init__(self, config_file=None, index_name=None):
@@ -230,11 +232,11 @@ class MetricsElasticSearch(object):
       search_body["_source"] = fields
     date_filter = None
     if date_start is not None or date_end is not None:
-      date_filter = {"range":{"dateLogged":{}}}
+      date_filter = {"range":{MetricsElasticSearch.F_DATELOGGED:{}}}
       if date_start is not None:
-        date_filter["range"]["dateLogged"]["gt"] = date_start.isoformat()
+        date_filter["range"][MetricsElasticSearch.F_DATELOGGED]["gt"] = date_start.isoformat()
       if date_end is not None:
-        date_filter["range"]["dateLogged"]["lte"] = date_end.isoformat()
+        date_filter["range"][MetricsElasticSearch.F_DATELOGGED]["lte"] = date_end.isoformat()
       search_body["query"]["bool"]["filter"] = date_filter
     return search_body
 
@@ -335,8 +337,8 @@ class MetricsElasticSearch(object):
                           "exclude": [-1,]                                #exclude terms that match values in this array
                         },
                         "aggs": {                                           #compute the min and max dateLogged for each session
-                          "min_date":{"min":{"field":"dateLogged"}},
-                          "max_date": {"max": {"field": "dateLogged"}},
+                          "min_date":{"min":{"field":MetricsElasticSearch.F_DATELOGGED}},
+                          "max_date": {"max": {"field": MetricsElasticSearch.F_DATELOGGED}},
                         }
                       }
                     }
@@ -463,7 +465,7 @@ class MetricsElasticSearch(object):
       "aggs": {
         "min_timestamp": {
           "min": {
-            "field": "dateLogged"
+            "field": MetricsElasticSearch.F_DATELOGGED
           }
         }
       }
@@ -497,7 +499,7 @@ class MetricsElasticSearch(object):
           ],
           "filter": {
             "range": {
-              "dateLogged": {
+              MetricsElasticSearch.F_DATELOGGED: {
                 "gte": "",
                 "lt": ""
               }
@@ -508,7 +510,7 @@ class MetricsElasticSearch(object):
       "aggs": {
         "group": {
           "terms": {
-            "field": "ipAddress"
+            "field": MetricsElasticSearch.F_IPADDR
           },
           "aggs": {
             "group_docs": {
@@ -520,7 +522,12 @@ class MetricsElasticSearch(object):
                     "unmapped_type": "date"
                   }
                 }],
-                "_source": {"includes": ["dateLogged", "ipAddress", MetricsElasticSearch.F_SESSIONID]}
+                "_source": {"includes": [
+                  MetricsElasticSearch.F_DATELOGGED,
+                  MetricsElasticSearch.F_IPADDR,
+                  MetricsElasticSearch.F_SESSIONID
+                  ]
+                }
               }
             }
           }
@@ -529,8 +536,8 @@ class MetricsElasticSearch(object):
     }
     gte = mark.isoformat() + "||-" + str(MetricsElasticSearch.SESSION_TTL_MINUTES) + "m"
     lt = mark.isoformat()
-    search_body["query"]["bool"]["filter"]["range"]["dateLogged"]["gte"] = gte
-    search_body["query"]["bool"]["filter"]["range"]["dateLogged"]["lt"] = lt
+    search_body["query"]["bool"]["filter"]["range"][MetricsElasticSearch.F_DATELOGGED]["gte"] = gte
+    search_body["query"]["bool"]["filter"]["range"][MetricsElasticSearch.F_DATELOGGED]["lt"] = lt
     return search_body
 
 
@@ -544,8 +551,8 @@ class MetricsElasticSearch(object):
     self._L.debug(str(results))
     for item in results["aggregations"]["group"]["buckets"]:
       record = item["group_docs"]["hits"]["hits"][0]["_source"]
-      time_stamp = record.get("dateLoged")
-      client_ip = record.get("ipAddress")
+      time_stamp = record.get(MetricsElasticSearch.F_DATELOGGED)
+      client_ip = record.get(MetricsElasticSearch.F_IPADDR)
       session_id = record.get(MetricsElasticSearch.F_SESSIONID)
       live_sessions[client_ip] = {}
       live_sessions[client_ip]["timestamp"] = time_stamp
@@ -576,7 +583,7 @@ class MetricsElasticSearch(object):
         }
       },
       "sort": [{
-        "dateLogged": {
+        MetricsElasticSearch.F_DATELOGGED: {
           "order": "asc",
           "unmapped_type": "date"
         }
@@ -617,7 +624,7 @@ class MetricsElasticSearch(object):
               }
             },
             {
-              "term": {"ipAddress": client_ip}
+              "term": {MetricsElasticSearch.F_IPADDR: client_ip}
             }
           ],
         }
@@ -625,7 +632,7 @@ class MetricsElasticSearch(object):
       "aggs": {
         "max_timestamp": {
           "max": {
-            "field": "dateLogged"
+            "field": MetricsElasticSearch.F_DATELOGGED
           }
         }
       }
@@ -667,7 +674,7 @@ class MetricsElasticSearch(object):
               }
             },
             {
-              "term": {"ipAddress": client_ip}
+              "term": {MetricsElasticSearch.F_IPADDR: client_ip}
             },
             {
               "range": {
@@ -718,8 +725,8 @@ class MetricsElasticSearch(object):
         self.updateRecord(index_name, record)
         self._L.debug("Event Session set to INVALID (-1)")
         continue
-      timestamp = record["_source"].get("dateLogged")
-      client_ip = record["_source"].get("ipAddress")
+      timestamp = record["_source"].get(MetricsElasticSearch.F_DATELOGGED)
+      client_ip = record["_source"].get(MetricsElasticSearch.F_IPADDR)
 
       last_entry_date = self.getLastProcessedEventDatetimeByIp(index_name, client_ip)
       if last_entry_date is not None:
@@ -781,7 +788,7 @@ class MetricsElasticSearch(object):
       live_sessions = self.getLiveSessionsBeforeMark(index_name, mark)
       self._L.debug(json.dumps(live_sessions))
       new_events = self.getNewEvents(index_name, batch_size)
-      self._processNewEvents(index_name, new_events, live_sessions)
+      self._processNewEvents(index_name=index_name, new_events=new_events, live_sessions=live_sessions)
       self._L.info("Processed batch %d of %d", batch_counter, total_batches)
       batch_counter += 1
     return 1
@@ -818,7 +825,7 @@ class MetricsElasticSearch(object):
           ],
           "filter": {
             "range": {
-              "dateLogged": {
+              MetricsElasticSearch.F_DATELOGGED: {
                 "gte": date_start.isoformat(),
                 "lte": date_end.isoformat()
               }
