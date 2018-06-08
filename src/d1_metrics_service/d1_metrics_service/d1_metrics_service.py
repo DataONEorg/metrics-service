@@ -21,4 +21,4 @@ metrics_handler_resource = MetricsReader() # pylint: disable=invalid-name
 api.add_route('/metrics', metrics_handler_resource)
 
 # Mapping the HTTP POST endpoint with its unique resource
-api.add_route('/metrics/filter', metrics_handler_resource)
+api.add_route('/metrics/filters', metrics_handler_resource)

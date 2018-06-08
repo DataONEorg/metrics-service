@@ -40,7 +40,6 @@ class MetricsReader:
         #taking query parametrs from the HTTP GET request and forming metricsRequest Object
         metrics_request = {}
         query_param = urlparse(unquote(req.url))
-        print(query_param)
         if ("=" in query_param.query):
             metrics_request = json.loads((query_param.query).split("=")[1])
             resp.body = json.dumps(self.process_request(metrics_request), ensure_ascii=False)
