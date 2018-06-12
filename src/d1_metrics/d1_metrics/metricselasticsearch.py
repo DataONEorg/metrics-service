@@ -211,6 +211,15 @@ class MetricsElasticSearch(object):
                         date_end=None,
                         formatTypes=None,
                         session_required=True):
+    """
+    Generates the query template to perform ES query
+    :param fields:
+    :param date_start:
+    :param date_end:
+    :param formatTypes:
+    :param session_required:
+    :return: Dictionary object for the search body based on the parameters passed.
+    """
     search_body = {
       "query": {
         "bool": {
@@ -242,6 +251,13 @@ class MetricsElasticSearch(object):
 
 
   def _getQueryResults(self, index, search_body, limit):
+    """
+
+    :param index:
+    :param search_body:
+    :param limit:
+    :return: Returns ES Query results
+    """
     self._L.info("Executing: %s", json.dumps(search_body, indent=2))
     results = self._scan(query=search_body, index=index)
     counter = 0
@@ -269,6 +285,17 @@ class MetricsElasticSearch(object):
                 date_start=None,
                 date_end=None,
                 fields=None):
+    """
+    Does a query to the ES given proper parameters and returns the result to the calling function.
+    :param index:
+    :param event_type:
+    :param session_id:
+    :param limit:
+    :param date_start:
+    :param date_end:
+    :param fields:
+    :return: Dictionary of results from the ES. Results are aggregated and includes complete paginated responses.
+    """
     if index is None:
       index = self.indexname
     search_body = self._getQueryTemplate(fields=fields, date_start=date_start, date_end=date_end)
@@ -287,6 +314,18 @@ class MetricsElasticSearch(object):
                   date_start=None,
                   date_end=None,
                   fields=None):
+    """
+    Performs a search Query on the ES index. Based on the parametrs passes, it sets the search body and returns the
+    result to the calling function.
+    :param index:
+    :param q:
+    :param session_id:
+    :param limit:
+    :param date_start:
+    :param date_end:
+    :param fields:
+    :return: Dictionary of results from the ES. Results are aggregated and includes complete paginated responses.
+    """
     if index is None:
       index = self.indexname
     search_body = self._getQueryTemplate(fields=fields, date_start=date_start, date_end=date_end)
@@ -802,19 +841,17 @@ class MetricsElasticSearch(object):
                   query=None,
                   aggQuery=None,
                   after_record = None):
-    '''
+    """
     Retrieve a response for aggregations
-    Args:
-      date_start:
-      date_end:
-      index:
-      query:
-      aggQuery:
-      after_record:
+    :param date_start:
+    :param date_end:
+    :param index:
+    :param query:
+    :param aggQuery:
+    :param after_record:
+    :return: Aggregations dictionary
+    """
 
-    Returns: Aggregations dictionary
-
-    '''
     if index is None:
       index = self.indexname
     search_body = {
@@ -852,6 +889,14 @@ class MetricsElasticSearch(object):
 
 
   def iterate_composite_aggregations(self, start_date, end_date, search_query = None, aggregation_query = None):
+    """
+    Performs pagination using the `after` parameter of the Composite aggregations of the ES.
+    :param start_date:
+    :param end_date:
+    :param search_query:
+    :param aggregation_query:
+    :return: Returns aggregated list of all the results retrieved from the ES
+    """
     count = 0
     total = 0
     size = 100

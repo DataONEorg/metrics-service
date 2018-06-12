@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 from urllib.parse import unquote
 import requests
 from d1_metrics.metricselasticsearch import MetricsElasticSearch
+from d1_metrics.metricsdatabase import MetricsDatabase
 from datetime import datetime
 
 
@@ -39,13 +40,11 @@ class MetricsReader:
         #taking query parametrs from the HTTP GET request and forming metricsRequest Object
         metrics_request = {}
         query_param = urlparse(unquote(req.url))
-
-
-
-        metrics_request = json.loads((query_param.query).split("=")[1])
-
-
-        resp.body = json.dumps(self.process_request(metrics_request), ensure_ascii=False)
+        if ("=" in query_param.query):
+            metrics_request = json.loads((query_param.query).split("=")[1])
+            resp.body = json.dumps(self.process_request(metrics_request), ensure_ascii=False)
+        else:
+            resp.body = json.dumps(metrics_request, ensure_ascii=False)
 
         # The following line can be omitted because 200 is the default
         # status returned by the framework, but it is included here to
@@ -59,7 +58,9 @@ class MetricsReader:
         :param resp: HTTP Response object
         :return: HTTP Response object
         """
-        metrics_request = json.loads(req.stream.read())
+        request_string = req.stream.read().decode('utf8')
+
+        metrics_request = json.loads(request_string)
 
         resp.body = json.dumps(self.process_request(metrics_request), ensure_ascii=False)
 
@@ -74,7 +75,7 @@ class MetricsReader:
         """
         This method parses the filters of the
         MetricsRequest object
-        :return:
+        :return: MetricsResponse Object
         """
         self.request = metrics_request
         self.response = metrics_request
@@ -93,9 +94,9 @@ class MetricsReader:
     def getSummaryMetricsPerDataset(self, PIDs):
         """
         Queries the Elastic Search and retrieves the summary metrics for a given dataset.
-        This information is used to populate the dataset landing pages,
+        This information is used to populate the dataset landing pages.
         :param PIDs:
-        :return:
+        :return: A dictionary containing lists of all the facets specified in the metrics_request
         """
         metrics_elastic_search = MetricsElasticSearch(PIDs)
         metrics_elastic_search.connect()
@@ -159,16 +160,93 @@ class MetricsReader:
                                                                      start_date=datetime.strptime(start_date,'%m/%d/%Y'),
                                                                      end_date=datetime.strptime(end_date,'%m/%d/%Y'))
 
-        return (self.formatData(data))
+        return (self.formatData(data, PIDs))
 
 
-    def formatData(self, data):
+    def formatData(self, data, PIDs):
         """
         Formats the data into the specified Swagger format
-        :param data:
-        :return:
+        :param data: Dictionary retrieved from the ES
+        :param PIDs: List of pids
+        :return: A dictionary containing lists of all the facets specified in the metrics_request
         """
-        return data["aggregations"]
+        records = {}
+        results = {
+            "months": [],
+            "country": [],
+            "downloads": [],
+            "views": [],
+            "citations": []
+
+        }
+
+        # Retreive the citations if any!
+        metrics_database = MetricsDatabase()
+        metrics_database.connect()
+        csr = metrics_database.getCursor()
+        sql = 'SELECT * FROM citations WHERE target_id IN (\'' + '\',\''.join(PIDs) +  '\');'
+        link_publication_date = []
+        try:
+            csr.execute(sql)
+            rows = csr.fetchall()
+            for i in rows:
+                link_publication_date.append(i[-1][:7])
+                print(link_publication_date)
+        except Exception as e:
+            print('Database error!\n{0}', e)
+        finally:
+            pass
+
+
+        # Combine metrics into a single dictionary
+        for i in data["aggregations"]["pid_list"]["buckets"]:
+            month = datetime.utcfromtimestamp((i["key"]["month"]//1000)).strftime(('%Y-%m'))
+            if month not in records:
+                records[month] = {}
+            if i["key"]["country"] not in records[month]:
+                records[month][i["key"]["country"]] = {}
+            if (i["key"]["format"] == "DATA"):
+                records[month][i["key"]["country"]]["downloads"] = i["doc_count"]
+            if (i["key"]["format"] == "METADATA"):
+                records[month][i["key"]["country"]]["views"] = i["doc_count"]
+            pass
+
+        # adding citation metric
+        for i in records:
+            # if(i in link_publication_date):
+                for countries in records[i]:
+                    records[i][countries]["citations"] = link_publication_date.count(i)
+
+        # Parse the dictionary to form the expected output in the form of lists
+        for months in records:
+            for country in records[months]:
+                results["months"].append(months)
+                results["country"].append(country)
+                if "downloads" in records[months][country]:
+                    results["downloads"].append(records[months][country]["downloads"])
+                else:
+                    results["downloads"].append(0)
+
+                # Views for the given time period.
+                # Note: Combining Views + Downloads
+                if "views" in records[months][country]:
+                    if "downloads" in records[months][country]:
+                        results["views"].append(records[months][country]["downloads"] + records[months][country]["views"])
+                    else:
+                        results["views"].append(records[months][country]["views"])
+                else:
+                    if "downloads" in records[months][country]:
+                        results["views"].append(records[months][country]["downloads"])
+                    else:
+                        results["views"].append(0)
+
+                if "citations" in records[months][country]:
+                    results["citations"].append(records[months][country]["citations"])
+                else:
+                    results["citations"].append(0)
+                    print("Not in range ", )
+
+        return results
 
 
     def resolvePIDs(self, PIDs):

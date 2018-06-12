@@ -33,15 +33,29 @@ class MetricsReporter(object):
 
 
     def report_handler(self, start_date, end_date):
+        """
+        Creates a Report JSON object, dumps it to a file and sends the report to the Hub.
+        This is a handler function that manages the entire work flow
+        :param start_date:
+        :param end_date:
+        :return: None
+        """
         json_object = {}
         json_object["report-header"] = self.get_report_header(start_date, end_date)
         json_object["report-datasets"] = self.get_report_datasets(start_date, end_date)
         with open((datetime.strptime(end_date,'%m/%d/%Y').strftime('%Y-%m-%d'))+'.json', 'w') as outfile:
             json.dump(json_object, outfile, indent=2,ensure_ascii=False)
         # self.send_reports()
+        return
 
 
     def get_report_header(self, start_date, end_date):
+        """
+        Generates a unique report header
+        :param start_date:
+        :param end_date:
+        :return: Dictionary report header object.
+        """
         report_header = {}
         report_header["report-name"] = self._config["report_name"]
         report_header["report-id"] = "DSR-" + datetime.today().strftime('%Y-%m-%d-%H-%M')
@@ -63,6 +77,12 @@ class MetricsReporter(object):
 
 
     def get_unique_pids(self, start_date, end_date):
+        """
+        Queries ES for the given time period and returns the set of pids
+        :param start_date:
+        :param end_date:
+        :return: SET object of pids for a given time range. (Always unique - because it is a set!)
+        """
         metrics_elastic_search = MetricsElasticSearch()
         metrics_elastic_search.connect()
         pid_list = []
@@ -95,6 +115,12 @@ class MetricsReporter(object):
 
 
     def generate_instances(self, start_date, end_date):
+        """
+
+        :param start_date:
+        :param end_date:
+        :return:
+        """
         metrics_elastic_search = MetricsElasticSearch()
         metrics_elastic_search.connect()
         report_instances = {}
@@ -185,6 +211,12 @@ class MetricsReporter(object):
 
 
     def get_report_datasets(self, start_date, end_date ):
+        """
+
+        :param start_date:
+        :param end_date:
+        :return:
+        """
         metrics_elastic_search = MetricsElasticSearch()
         metrics_elastic_search.connect()
         report_datasets = []
@@ -273,6 +305,11 @@ class MetricsReporter(object):
 
 
     def resolve_MN(self, authoritativeMN):
+        """
+        Queries the Node endpoint to retrieve the details about the authoritativeMN
+        :param authoritativeMN:
+        :return: String value of the name of the authoritativeMN
+        """
         node_url = "https://cn.dataone.org/cn/v2/node/" + authoritativeMN
         resp = requests.get(node_url, stream=True)
         root = ElementTree.fromstring(resp.content)
@@ -282,11 +319,10 @@ class MetricsReporter(object):
 
 
     def send_reports(self):
-        '''
-        Sending the reports to the Hub
-        Prints out the HTTP Success / Error Response from the Hub.
-        :return: void
-        '''
+        """
+        Sends report to the Hub at the specified Hub report url in the config parameters
+        :return: Nothing
+        """
         s = requests.session()
         s.headers.update(
             {'Authorization': f'Bearer {self._config["auth_token"]}', 'Content-Type': 'application/json', 'Accept': 'application/json'})
@@ -304,11 +340,12 @@ class MetricsReporter(object):
 
 
     def query_solr(self, PID):
-        '''
+        """
         Queries the Solr end-point for metadata given the PID.
         :param PID:
         :return: JSON Object containing the metadata fields queried from Solr
-        '''
+        """
+
         queryString = 'q=id:"' + PID + '"&fl=origin,title,datePublished,dateUploaded,authoritativeMN,dataUrl&wt=json'
         response = requests.get(url = self._config["solr_query_url"], params = queryString)
 
@@ -316,11 +353,22 @@ class MetricsReporter(object):
 
 
     def scheduler(self):
+        """
+        This function sends reports to the hub with events reported on daily basis from Jan 01, 2000
+        Probably would be called only once in its lifetime
+        :return: None
+        """
         date = datetime(2000, 1, 1)
-        for i in range(70):
+        count = 0
+        while (date != datetime.today().strftime('%Y-%m-%d')):
+            count = count + 1
             prevDate = date
             date += timedelta(days=1)
-            print("Job ", i, " : ", prevDate, " to ", date)
+
+            # Uncomment me to send reports to the HUB!
+            # self.report_handler(prevDate, date)
+
+            print("Job ", count, " : ", prevDate, " to ", date)
 
 
 if __name__ == "__main__":
