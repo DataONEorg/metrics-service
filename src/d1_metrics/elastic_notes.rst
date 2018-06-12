@@ -35,35 +35,35 @@ Example of a single event log line (rendered on multiple lines for readability):
 
     {
       "_version_": 1594950652431171600,
-      "versionCompliance": "v1",
-      "id": "urn:node:mnTestNCEI.505187",
-      "entryId": "505187",
-      "nodeId": "urn:node:mnTestNCEI",
-      "pid": "urn:uuid:6a5d440f-9fb5-4dae-9b3e-fd36b76f0b4f",
-      "formatType": "METADATA",
-      "formatId": "eml://ecoinformatics.org/eml-2.1.1",
-      "dateLogged": "2018-03-13T19:49:38.416Z",
-      "dateAggregated": "2018-03-14T21:37:52.547Z",
-      "dateUpdated": "1900-01-01T00:00:00Z",
-      "event": "read",
-      "ipAddress": "128.111.54.76",
-      "isRepeatVisit": false,
-      "inPartialRobotList": true,
-      "inFullRobotList": true,
-      "isPublic": false,
-      "size": 5483,
-      "rightsHolder": "CN=arctic-data-admins,DC=dataone,DC=org",
-      "subject": "CN=urn:node:cnStageUCSB1,DC=dataone,DC=org",
-      "readPermission": [
+      "versionCompliance": "v1",                                   // API version
+      "id": "urn:node:mnTestNCEI.505187",                          // ID for this event
+      "entryId": "505187",                                         // ID for event provided by MN
+      "nodeId": "urn:node:mnTestNCEI",                             // Node identifier for event origin
+      "pid": "urn:uuid:6a5d440f-9fb5-4dae-9b3e-fd36b76f0b4f",      // Object for which event is associated
+      "formatType": "METADATA",                                    // The format type of the object
+      "formatId": "eml://ecoinformatics.org/eml-2.1.1",            // The formatId of the object
+      "dateLogged": "2018-03-13T19:49:38.416Z",                    // When the event was logged
+      "dateAggregated": "2018-03-14T21:37:52.547Z",                // When the even was harvested
+      "dateUpdated": "1900-01-01T00:00:00Z",                       // ?
+      "event": "read",                                             // The type of event
+      "ipAddress": "128.111.54.76",                                // Client that triggered the event
+      "isRepeatVisit": false,                                      //
+      "inPartialRobotList": true,                                  //
+      "inFullRobotList": true,                                     //
+      "isPublic": false,                                           // Unused, always false
+      "size": 5483,                                                // size of the object in bytes
+      "rightsHolder": "CN=arctic-data-admins,DC=dataone,DC=org",   // Rights holder of the object
+      "subject": "CN=urn:node:cnStageUCSB1,DC=dataone,DC=org",     // Identity of client that triggered event
+      "readPermission": [                                          // Who can directly read the event == object changePermission
         "CN=arctic-data-admins,DC=dataone,DC=org",
         "CN=arctic-data-admins,DC=dataone,DC=org"
       ],
-      "userAgent": "Apache-HttpClient/4.3.6 (java 1.5)",
-      "location": "34.4329, -119.8371",
-      "country": "United States",
+      "userAgent": "Apache-HttpClient/4.3.6 (java 1.5)",           // User Agent of client that triggered event
+      "location": "34.4329, -119.8371",                            // Location of event, from IP address
+      "country": "United States",                                  // Location details
       "region": "California",
       "city": "Santa Barbara",
-      "geohash_1": "9",
+      "geohash_1": "9",                                            // Geohashes of location, at different resolutions
       "geohash_2": "9q",
       "geohash_3": "9q4",
       "geohash_4": "9q4g",
@@ -73,6 +73,8 @@ Example of a single event log line (rendered on multiple lines for readability):
       "geohash_8": "9q4gch36",
       "geohash_9": "9q4gch361"
     }
+
+Note that the geolocation information is discarded later during ingest to elastic search by logstash.
 
 
 Step 5. Filebeat
@@ -114,44 +116,102 @@ Logstash configuration files: ``/etc/logstash/conf.d``
 Eventlog logstash pipeline::
 
     input {
-    beats {
-      port => 5705
-    }
+      beats {
+        port => 5705
+      }
     }
     filter {
-    if [beat][name] == "eventlog" {
-      json {
-        # remove the message property since this is duplicate information
-        source => "message"
-        remove_field => ["message"]
+      if [beat][name] == "eventlog" {
+        json {
+          # remove the message property since this is duplicate information
+          source => "message"
+          remove_field => ["message"]
+        }
+        date {
+          #set the timestamp of the event to be the dateLogged
+          match => ["dateLogged","ISO8601"]
+          target => "@timestamp"
+        }
+        mutate {
+          id => "clean_record"
+          remove_field => ["location","country","region","city","geohash_1","geohash_2","geohash_3","geohash_4","geohash_5","geohash_6","geohash_7","geohash_8","geohash_9","inFullRobotList","inPartialRobotList","isPublic"]
+        }
+        geoip {
+          # Georeference the IP address
+          source => "ipAddress"
+          tag_on_failure => ["_geoip_lookup_failure"]
+        }
+        cidr {
+          # Tag if IP is from a DataONE address
+          id => "D1IP"
+          address => [ "%{ipAddress}" ]
+          network_path => "/etc/dataone/metrics/dataone_ips.txt"
+          refresh_interval => 600
+          add_tag => [ "dataone_ip", "ignore_ip" ]
+        }
+        cidr {
+          # Tag if IP is in the known Robot IP list
+          id => "ROBOTIP"
+          address => [ "%{ipAddress}" ]
+          network_path => "/etc/dataone/metrics/robot_ips.txt"
+          refresh_interval => 600
+          add_tag => [ "robot_ip", "ignore_ip" ]
+        }
+        grok {
+          id => "grok_machine"
+          match => { "userAgent" => "^ruby$|AddThis|aria2\/\d|CakePHP|ColdFusion|curl\/|^\%?default\%?$|Dispatch\/\d|EBSCO\sEJS\sContent\sServer|Fetch(\s|\+)API(\s|\+)Request|geturl|gvfs\/|HttpComponents\/1.1|http.?client|Indy Library|^java\/\d{1,2}.\d|libcurl|libhttp|libwww|lwp|Microsoft(\s|\+)URL(\s|\+)Control|Microsoft Office Existence Discovery|ng\/2\.|no_user_agent|pear.php.net|PHP\/|PycURL|python|rss|^undefined$|^unknown$|URL2File|urllib|Wget|wordpress" }
+          add_tag => [ "machine_ua" ]
+          tag_on_failure => [ "_notmachineua" ]
+        }
+        grok {
+          # Huge regexp for matching User Agents with known robots list
+          id => "grok_robot"
+          match => { "userAgent" => "bot|spider|crawl|[^a]fish|^voyager\/|ADmantX|alexa|Alexandria(\s|\+)prototype(\s|\+)project|AllenTrack|almaden|appie|API[\+\s]scraper|Arachmo|architext|ArchiveTeam|arks|asterias|atomz|BDFetch|baidu|biglotron|BingPreview|binlar|Blackboard[\+\s]Safeassign|blaiz\-bee|bloglines|blogpulse|boitho\.com\-dc|bookmark\-manager|Brutus\/AET|BUbiNG|bwh3_user_agent|celestial|cfnetwork|checklink|checkprivacy|China\sLocal\sBrowse\s2\.6|cloakDetect|coccoc\/1\.0|collection@infegy.com|com\.plumanalytics|combine|contentmatch|ContentSmartz|convera|core|CoverScout|cursor|custo|DataCha0s\/2\.0|daumoa|DeuSu\/|Docoloc|docomo|DSurf|DTS Agent|easydl|EmailSiphon|EmailWolf|Embedly|EThOS\+\(British\+Library\)|facebookexternalhit\/|feedburner|FeedFetcher|feedreader|ferret|findlinks|Fulltext|Funnelback|G-i-g-a-b-o-t|Goldfire(\s|\+)Server|google|Grammarly|grub|gulliver|harvest|heritrix|holmes|htdig|htmlparser|HTTPFetcher|httrack|ia_archiver|ichiro|iktomi|ilse|^integrity\/\d|internetseer|intute|iSiloX|iskanie|jeeves|jobo|kyluka|larbin|lilina|link.?check|LinkLint-checkonly|^LinkParser\/|^LinkSaver\/|linkscan|LinkTiger|linkwalker|lipperhey|livejournal\.com|LOCKSS|ltx71|lycos[\_\+]|mail.ru|mediapartners\-google|megite|MetaURI[\+\s]API\/\d\.\d|mimas|mnogosearch|moget|motor|MuscatFerre|myweb|nagios|^NetAnts\/\d|netcraft|netluchs|Ning|nomad|nutch|^oaDOI$|ocelli|Offline(\s|\+)Navigator|onetszukaj|OurBrowser|panscient|parsijoo|EasyBib[\+\s]AutoCite[\+\s]|perman|pioneer|playmusic\.com|playstarmusic\.com|^Postgenomic(\s|\+)v2|powermarks|proximic|Qwantify|Readpaper|redalert|Riddler|robozilla|scan4mail|scientificcommons|scirus|scooter|Scrapy\/\d|^scrutiny\/\d|SearchBloxIntra|shoutcast|SkypeUriPreview|slurp|sogou|speedy|Strider|summify|sunrise|Sysomos|T\-H\-U\-N\-D\-E\-R\-S\-T\-O\-N\-E|tailrank|Teleport(\s|\+)Pro|Teoma|titan|^Traackr\.com$|Trove|twiceler|ucsd|ultraseek|urlaliasbuilder|validator|virus.detector|voila|^voltron$|voyager\/|w3af.org|Wanadoo|Web(\s|\+)Downloader|WebCloner|webcollage|WebCopier|Webinator|weblayers|Webmetrics|webmirror|webmon|webreaper|WebStripper|WebZIP|worm|www.gnip.com|WWW\-Mechanize|xenu|y!j|yacy|yahoo|yandex|zeus|zyborg" }
+          add_tag => [ "robot_ua" ]
+          tag_on_failure => [ "_notrobotua" ]
+        }
+        mutate {
+          id => "post_grok"
+          remove_tag => ["_notrobotua", "_notmachineua"]
+        }
       }
-      date {
-        #set the timestamp of the event to be the dateLogged
-        match => ["dateLogged","ISO8601"]
-        target => "@timestamp"
-      }
-      geoip {
-        source => "ipAddress"
-        tag_on_failure => ["_geoip_lookup_failure"]
-        remove_field => ["location","country","region","city"]
-      }
-      mutate {
-        id => "eventmutation"
-      }
-    }
     }
     output {
-    #output to the local elasticsearch instance
-    if [beat][name] == "eventlog" {
-        elasticsearch {
-          hosts => ["127.0.0.1:9200"]
-          index => "eventlog-0"
-        }
-    }
+      #output to the local elasticsearch instance
+      if [beat][name] == "eventlog" {
+          elasticsearch {
+            hosts => ["127.0.0.1:9200"]
+            index => "eventlog-0"
+          }
+      }
     }
 
+The configuration references two external files listing the DataONE and known robot IPs, and includes
+``grok`` pattern that are generated from::
 
-Templates are described at: https://www.elastic.co/guide/en/elasticsearch/reference/current/indices-templates.html
+  https://raw.githubusercontent.com/CDLUC3/Make-Data-Count/master/user-agents/lists/machine.txt
+
+and::
+
+  https://raw.githubusercontent.com/CDLUC3/Make-Data-Count/master/user-agents/lists/robot.txt
+
+by OR'ing the elements together into a single regular expression.
+
+After importing by logstash, records will be georeferenced where possible, with the results appearing in the ``geoip``
+field.
+
+If the requesting IP is a DataONE CN or MN, then the tags ``dataone_ip`` and ``ignore_ip`` are set.
+
+if the requesting IP is a known robot IP address, then the tags ``robot_ip`` and ``ignore_ip`` are set.
+
+If the UserAgent of the requesting client matches an entry from the "Machines" list, then the record is tagged with ``machine_ua``.
+
+If the UserAgent of the requesting client matches an entry from the "Robots" list, then the record is tagged with ``robot_ua``.
+
+
+Templates for the index.
+
+Index templates are described at: https://www.elastic.co/guide/en/elasticsearch/reference/current/indices-templates.html
 
 Template for eventlog* documents::
 
@@ -179,24 +239,7 @@ Template for eventlog* documents::
           "dateUpdated": {"type":"date"},
           "dateAggregated": {"type":"date"},
           "userAgent": {"type":"text"},
-          "isRepeatVisit": {"type":"boolean"},
-          "inPartialRobotList": {"type":"boolean"},
-          "inFullRobotList": {"type":"boolean"},
-          "location": {"type":"geo_point"},
-          "country": {"type":"text", "fields":{"key":{"type":"keyword"}}},
-          "region": {"type":"text", "fields":{"key":{"type":"keyword"}}},
-          "city": {"type":"text", "fields":{"key":{"type":"keyword"}}},
-          "geohash_1": {"type":"geo_point", "fields":{"key":{"type":"keyword"}}},
-          "geohash_2": {"type":"geo_point", "fields":{"key":{"type":"keyword"}}},
-          "geohash_3": {"type":"geo_point", "fields":{"key":{"type":"keyword"}}},
-          "geohash_4": {"type":"geo_point", "fields":{"key":{"type":"keyword"}}},
-          "geohash_5": {"type":"geo_point", "fields":{"key":{"type":"keyword"}}},
-          "geohash_6": {"type":"geo_point", "fields":{"key":{"type":"keyword"}}},
-          "geohash_7": {"type":"geo_point", "fields":{"key":{"type":"keyword"}}},
-          "geohash_8": {"type":"geo_point", "fields":{"key":{"type":"keyword"}}},
-          "geohash_9": {"type":"geo_point", "fields":{"key":{"type":"keyword"}}},
           "rightsHolder": {"type":"text", "fields":{"key":{"type":"keyword"}}},
-          "isPublic": {"type":"boolean"},
           "subject": {"type":"text", "fields":{"key":{"type":"keyword"}}},
           "readPermission":  {"type":"keyword"},
           "sessionId": {"type":"long"}
@@ -206,6 +249,7 @@ Template for eventlog* documents::
   }
 
 Note that the ``sessionId`` property is not present in eventlog entries until after Step 7 where sessions are calculated.
+
 
 
 Step 7. Computing Sessions

@@ -26,12 +26,12 @@ class MetricsElasticSearch(object):
 
   '''
 
-  MAX_AGGREGATIONS = 999999999 #get them all...
-  BATCH_SIZE = 1000
-  SESSION_TTL_MINUTES = 60
-  F_SESSIONID = "sessionId"
-  F_DATELOGGED = "dateLogged"
-  F_IPADDR = "ipAddress"
+  MAX_AGGREGATIONS = 999999999  #get them all...
+  BATCH_SIZE = 1000             # Size of a batch when computing sessions
+  SESSION_TTL_MINUTES = 60      # Duration of a session
+  F_SESSIONID = "sessionId"     # Name of the sessionId field
+  F_DATELOGGED = "dateLogged"   # Name of the field where the event timestamp is recorded
+  F_IPADDR = "ipAddress"        # name ofthe IP Address field
 
 
   def __init__(self, config_file=None, index_name=None):
@@ -476,11 +476,11 @@ class MetricsElasticSearch(object):
       results = self._es.search(index=index_name, body=search_body)
       esvalue = results["aggregations"]["min_timestamp"]["value"] or None
       if esvalue is None:
-        raise ValueError("No max dateLogged available!")
+        raise ValueError("No unprocessed events.")
       mark = datetime.datetime.fromtimestamp(esvalue / 1000, tz=tzutc())
       return mark
     except Exception as e:
-      self._L.error(e)
+      self._L.warning(e)
     return None
 
 
@@ -770,7 +770,7 @@ class MetricsElasticSearch(object):
     if index_name is None:
       index_name = self.indexname
     self._session_id = self.getNextSessionId(index_name)
-    batch_size = 1000
+    batch_size = MetricsElasticSearch.BATCH_SIZE
     batch_counter = 0
     self._es.indices.refresh(index_name)
     unprocessed_count = self.countUnprocessedEvents(index_name)
@@ -783,14 +783,15 @@ class MetricsElasticSearch(object):
       self._es.indices.refresh(index_name)
       mark = self.getFirstUnprocessedEventDatetime(index_name)
       if mark is None:
+        self._L.info("Completed computeSessions.")
         return 0
       self._L.info("At mark: %s", mark.isoformat())
       live_sessions = self.getLiveSessionsBeforeMark(index_name, mark)
       self._L.debug(json.dumps(live_sessions))
       new_events = self.getNewEvents(index_name, batch_size)
       self._processNewEvents(index_name=index_name, new_events=new_events, live_sessions=live_sessions)
-      self._L.info("Processed batch %d of %d", batch_counter, total_batches)
       batch_counter += 1
+      self._L.info("Processed batch %d of %d", batch_counter, total_batches)
     return 1
 
 
