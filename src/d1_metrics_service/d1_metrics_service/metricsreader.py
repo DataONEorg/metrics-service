@@ -215,6 +215,8 @@ class MetricsReader:
         for i in records:
             # if(i in link_publication_date):
                 for countries in records[i]:
+                    # Assigining the citation to each of the country for now.
+                    # TODO: Discuss with the team about this.
                     records[i][countries]["citations"] = link_publication_date.count(i)
 
         # Parse the dictionary to form the expected output in the form of lists

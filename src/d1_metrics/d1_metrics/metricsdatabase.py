@@ -280,10 +280,10 @@ class MetricsDatabase(object):
     :return: None. Saves the citations in the Citation table of the MDC database
     '''
 
-    dois, pref = self.getDOIs()
+    pids, dois, pref = self.getDOIs()
     csr = self.getCursor()
-    sql = "INSERT INTO CITATIONS(id, target_id, source_id, relation_type, source_id_Scheme, source_id_url, " +\
-          "source_type_name, source_sub_type, source_sub_type_schema, link_publication_date) values ( DEFAULT,'"
+    sql = "INSERT INTO CITATIONS(id, target_id, source_id, link_publication_date, origin, title, " +\
+          "publisher, year_of_publishing) values ( DEFAULT,'"
 
     count = 0
     for i in pref:
@@ -291,18 +291,21 @@ class MetricsDatabase(object):
       dict = res.json()
       for val in dict["message"]["link-packages"]:
         if (val["Target"]["Identifier"]["ID"] in dois):
+          target_pid = val["Target"]["Identifier"]["ID"]
+          for i in pids:
+            if val["Target"]["Identifier"]["ID"] in i:
+              target_pid = i
+              break
           try:
-            count = count + 1
             values = []
-            values.append(val["Target"]["Identifier"]["ID"])
-            values.append(val["Source"]["Identifier"]["ID"])
-            values.append(val["RelationshipType"]["Name"])
-            values.append(val["Source"]["Identifier"]["IDScheme"])
-            values.append(val["Source"]["Identifier"]["IDUrl"])
-            values.append(val["Source"]["Type"]["Name"])
-            values.append(val["Source"]["Type"]["SubType"])
-            values.append(val["Source"]["Type"]["SubTypeSchema"])
-            values.append(val["LinkPublicationDate"])
+            values.append(target_pid)
+            values.append("doi:"+val["Source"]["Identifier"]["ID"])
+            values.append(val["LinkPublicationDate"][:10])
+            metadata = requests.get("https://api.crossref.org/works/"+val["Source"]["Identifier"]["ID"]).json()
+            values.append(", ".join((i["given"] + " " + i["family"]) for i in metadata["message"]["author"]))
+            values.append(metadata["message"]["title"][0])
+            values.append(metadata["message"]["publisher"])
+            values.append(str(metadata["message"]["created"]["date-parts"][0][0]))
 
             csr.execute(sql + "','".join(values) + "');")
             print("A new citation record inserted!")
@@ -313,6 +316,56 @@ class MetricsDatabase(object):
             print('Operational error!\n{0}', e)
           finally:
             self.conn.commit()
+
+    print("Queries executed!")
+    return
+
+
+  def updateCitationMetadata(self):
+    """
+    This function queries the Crossref end point for metadata of the sources that cited our datasets.
+    This is meant to keep the metadata up to ddate in our system.
+    :return:
+    """
+    csr = self.getCursor()
+
+    getSourcePIDs = "SELECT source_id FROM CITATIONS;"
+    sql = "UPDATE CITATIONS SET (origin, title, publisher, year_of_publishing) = ('"
+    pref = []
+    try:
+      csr.execute(getSourcePIDs)
+      results = csr.fetchall()
+      for i in results:
+        start_doi = i[0].index("10.")
+        pref.append(i[0][start_doi:])
+    except psycopg2.DatabaseError as e:
+      print('Database error!\n{0}', e)
+    except psycopg2.OperationalError as e:
+      print('Operational error!\n{0}', e)
+    finally:
+      self.conn.commit()
+
+
+    for doi in pref:
+      metadata = requests.get("https://api.crossref.org/works/" + doi).json()
+      try:
+        values = []
+        condition = "WHERE source_id = '" + "doi:" + doi + "'"
+        values.append(", ".join((i["given"] + " " + i["family"]) for i in metadata["message"]["author"]))
+        values.append(metadata["message"]["title"][0])
+        values.append(metadata["message"]["publisher"])
+        values.append(str(metadata["message"]["created"]["date-parts"][0][0]))
+
+        csr.execute(sql + "', '".join(values) + "')" + condition + ";")
+        print("Record updated")
+
+      except psycopg2.DatabaseError as e:
+        print('Database error!\n{0}', e)
+      except psycopg2.OperationalError as e:
+        print('Operational error!\n{0}', e)
+      finally:
+        self.conn.commit()
+
     print("Queries executed!")
     return
 
@@ -322,20 +375,23 @@ class MetricsDatabase(object):
     Scans the solr end point for DOIs
     :return: Set objects containing dois and their prefixes
     """
-    cd = solrclient.SolrClient('https://cn-ucsb-1.dataone.org/cn/v2/query', 'solr')
+    cd = solrclient.SolrClient('https://cn.dataone.org/cn/v2/query', 'solr')
     data = cd.getFieldValues('id', q='id:*doi*')
     res = []
     prefixes = []
+    pids = []
     for hit in data['id'][::2]:
       start_doi = hit.index("10.")
       res.append(hit[start_doi:])
+      pids.append(hit)
       prefixes.append(hit[start_doi:start_doi+7])
+    pids = set(pids)
     dois = set(res)
     pref = set(prefixes)
-    return dois, pref
+    return pids, dois, pref
 
 
 
-# if __name__ == "__main__":
-#   md = MetricsDatabase()
-#   md.getCitations()
+if __name__ == "__main__":
+  md = MetricsDatabase()
+  md.updateCitationMetadata()

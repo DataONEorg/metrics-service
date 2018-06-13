@@ -36,10 +36,11 @@ create table citations (
     id SERIAL,                    -- identifier of the record
     target_id TEXT,               -- target(dataset that was cited) identifier
     source_id TEXT,               -- source identifier
-    origin TEXT,                  -- authors of the source dataset
-    title TEXT,                   -- publisher e.g. dataONE
-    year_of_publishing, INTEGER,  -- YOP for the source dataset
     link_publication_date TEXT,   -- the date when this relation was first recorded by CROSSREF.
+    origin TEXT,                  -- authors of the source dataset
+    title TEXT,                   -- title of the dataset
+    publisher TEXT,               -- publisher e.g. dataONE
+    year_of_publishing INTEGER,   -- YOP for the source dataset
     primary key(target_id, source_id, link_publication_date)
 );
 
