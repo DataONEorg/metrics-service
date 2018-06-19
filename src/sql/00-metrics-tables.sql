@@ -34,6 +34,8 @@ CREATE TABLE metrics(
  */
 create table citations (
     id SERIAL,                    -- identifier of the record
+    report  JSON,                 -- the json report object
+    metadata  JSON,               -- the json metadata object
     target_id TEXT,               -- target(dataset that was cited) identifier
     source_id TEXT,               -- source identifier
     link_publication_date TEXT,   -- the date when this relation was first recorded by CROSSREF.

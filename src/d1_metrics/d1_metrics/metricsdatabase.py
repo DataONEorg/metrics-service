@@ -282,7 +282,7 @@ class MetricsDatabase(object):
 
     pids, dois, pref = self.getDOIs()
     csr = self.getCursor()
-    sql = "INSERT INTO CITATIONS(id, target_id, source_id, link_publication_date, origin, title, " +\
+    sql = "INSERT INTO CITATIONS(id, report, metadata, target_id, source_id, link_publication_date, origin, title, " +\
           "publisher, year_of_publishing) values ( DEFAULT,'"
 
     count = 0
@@ -306,8 +306,7 @@ class MetricsDatabase(object):
             values.append(metadata["message"]["title"][0])
             values.append(metadata["message"]["publisher"])
             values.append(str(metadata["message"]["created"]["date-parts"][0][0]))
-
-            csr.execute(sql + "','".join(values) + "');")
+            csr.execute(sql + dict + "','" + metadata + "','" + "','".join(values) + "');")
             print("A new citation record inserted!")
 
           except psycopg2.DatabaseError as e:
@@ -394,4 +393,4 @@ class MetricsDatabase(object):
 
 if __name__ == "__main__":
   md = MetricsDatabase()
-  md.updateCitationMetadata()
+  md.getCitations()
