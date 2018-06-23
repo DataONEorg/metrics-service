@@ -6,6 +6,7 @@ localconfig.ini
 
 # Log file
 *.log
+/logs/*
 
 # BlueJ files
 *.ctxt

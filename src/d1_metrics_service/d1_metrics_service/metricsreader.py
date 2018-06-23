@@ -40,6 +40,7 @@ class MetricsReader:
         #taking query parametrs from the HTTP GET request and forming metricsRequest Object
         metrics_request = {}
         query_param = urlparse(unquote(req.url))
+
         if ("=" in query_param.query):
             metrics_request = json.loads((query_param.query).split("=")[1])
             resp.body = json.dumps(self.process_request(metrics_request), ensure_ascii=False)
@@ -78,7 +79,7 @@ class MetricsReader:
         :return: MetricsResponse Object
         """
         self.request = metrics_request
-        self.response = metrics_request
+        self.response["metricsRequest"] = metrics_request
         metrics_page = self.request['metricsPage']
         filter_by = self.request['filterBy']
         metrics = self.request['metrics']
@@ -134,17 +135,17 @@ class MetricsReader:
                 }
             }
         }
-        pid = self.response["filterBy"][0]["values"]
-        self.response["filterBy"][0]["values"] = self.resolvePIDs(PIDs=pid)
-        self.request["filterBy"][0]["values"] = self.response["filterBy"][0]["values"]
+        pid = self.response["metricsRequest"]["filterBy"][0]["values"]
+        self.response["metricsRequest"]["filterBy"][0]["values"] = self.resolvePIDs(PIDs=pid)
+        self.request["filterBy"][0]["values"] = self.response["metricsRequest"]["filterBy"][0]["values"]
 
         start_date = "01/01/2000"
         end_date = datetime.today().strftime('%m/%d/%Y')
 
-        if(len(self.response["filterBy"]) > 1):
-            if (self.response["filterBy"][1]["filterType"] == "month" and self.response["filterBy"][1]["interpretAs"] == "range"):
-                start_date = self.response["filterBy"][1]["values"][0]
-                end_date = self.response["filterBy"][1]["values"][1]
+        if(len(self.response["metricsRequest"]["filterBy"]) > 1):
+            if (self.response["metricsRequest"]["filterBy"][1]["filterType"] == "month" and self.response["metricsRequest"]["filterBy"][1]["interpretAs"] == "range"):
+                start_date = self.response["metricsRequest"]["filterBy"][1]["values"][0]
+                end_date = self.response["metricsRequest"]["filterBy"][1]["values"][1]
 
             monthObject = {
                 "month": {
@@ -191,7 +192,6 @@ class MetricsReader:
             rows = csr.fetchall()
             for i in rows:
                 link_publication_date.append(i[-1][:7])
-                print(link_publication_date)
         except Exception as e:
             print('Database error!\n{0}', e)
         finally:
@@ -215,6 +215,8 @@ class MetricsReader:
         for i in records:
             # if(i in link_publication_date):
                 for countries in records[i]:
+                    # Assigining the citation to each of the country for now.
+                    # TODO: Discuss with the team about this.
                     records[i][countries]["citations"] = link_publication_date.count(i)
 
         # Parse the dictionary to form the expected output in the form of lists
