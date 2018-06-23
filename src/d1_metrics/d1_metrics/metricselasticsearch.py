@@ -482,6 +482,15 @@ class MetricsElasticSearch(object):
 
 
   def getFirstUnprocessedEventDatetime(self, index_name=None):
+    '''
+    Returns the datetime of the oldest read event with no session information.
+
+    Args:
+      index_name: Name of index to use
+
+    Returns:
+      datetime or None
+    '''
     search_body = {
       "from": 0, "size": 0,
       "query": {
@@ -524,6 +533,21 @@ class MetricsElasticSearch(object):
 
 
   def getLiveSessionsSearchBody(self, mark):
+    '''
+    Returns a search body for retrieving active sessions.
+
+    An active session is a session where the oldest read event was logged less than
+    the duration of SESSION_TTL_MINUTES ago.
+
+    There may be multiple sessions matching that critera, so the outcome is a list of
+    [dateLogged, IPAddress, sessionId]
+
+    Args:
+      mark: datetime to measure from
+
+    Returns: a search body for the query
+
+    '''
     search_body = {
       "from": 0, "size": 0,
       "query": {
@@ -581,6 +605,20 @@ class MetricsElasticSearch(object):
 
 
   def getLiveSessionsBeforeMark(self, index_name=None, mark=None):
+    '''
+    Get a dictionary of sessions and timestamp indexed by IPaddress for active sessions.
+
+    Args:
+      index_name: Name of the event index
+      mark: datetime to match for live sessions.
+
+    Returns:
+      {ip: {
+        timestamp: timestamp of oldest event in session,
+        sessionId: session
+        }
+      }
+    '''
     live_sessions = {}
     if index_name is None:
       index_name = self.indexname
@@ -593,6 +631,9 @@ class MetricsElasticSearch(object):
       time_stamp = record.get(MetricsElasticSearch.F_DATELOGGED)
       client_ip = record.get(MetricsElasticSearch.F_IPADDR)
       session_id = record.get(MetricsElasticSearch.F_SESSIONID)
+      if client_ip in live_sessions:
+        self._L.warning("Multiple live sessions detected for a single IP address! : %s", client_ip)
+      #TODO: what's the best course of action here? Bail? Override?, Ignore?
       live_sessions[client_ip] = {}
       live_sessions[client_ip]["timestamp"] = time_stamp
       live_sessions[client_ip][MetricsElasticSearch.F_SESSIONID] = session_id
@@ -600,6 +641,14 @@ class MetricsElasticSearch(object):
 
 
   def getNewEvents(self, index_name=None, batch_size=BATCH_SIZE):
+    '''
+    Get a batch of events that are not associated with a session
+    Args:
+      index_name: Name of the index to use
+      batch_size: Maximum number of records to return in the batch
+
+    Returns: elastic search response structure with the events, ordered by date logged.
+    '''
     if index_name is None:
       index_name = self.indexname
     search_body = {
@@ -742,6 +791,19 @@ class MetricsElasticSearch(object):
 
 
   def _processNewEvents(self, index_name=None, new_events=[], live_sessions=[]):
+    '''
+    Update new_events with sessionIds from either existing sessions or new sessions.
+
+    This is where sessionIds get assigned and new sessions get created.
+
+    Args:
+      index_name: name of the event index
+      new_events:  List of events for which session is to be calculated
+      live_sessions: The list of active sessions
+
+    Returns: nothing
+
+    '''
     if index_name is None:
       index_name = self.indexname
     counter = 0
@@ -763,6 +825,7 @@ class MetricsElasticSearch(object):
         record["_source"][MetricsElasticSearch.F_SESSIONID] = -1
         self.updateRecord(index_name, record)
         self._L.debug("Event Session set to INVALID (-1)")
+        #skip further processing on this record and get the next one
         continue
       timestamp = record["_source"].get(MetricsElasticSearch.F_DATELOGGED)
       client_ip = record["_source"].get(MetricsElasticSearch.F_IPADDR)
@@ -803,32 +866,58 @@ class MetricsElasticSearch(object):
   def computeSessions(self,
                       index_name=None,
                       dry_run=False):
+    '''
+    Updates event records with session a session id.
+
+    Args:
+      index_name: Name of the index to use
+      dry_run: If True, then just show work to be done
+
+    Returns: 0 if ok.
+    '''
+    #Quiet down the elastic search logger a bit
     es_logger = logging.getLogger('elasticsearch')
     es_logger.propagate = False
     es_logger.setLevel(logging.WARNING)
     if index_name is None:
       index_name = self.indexname
+
+    #Get the next session id to be assigned
     self._session_id = self.getNextSessionId(index_name)
     batch_size = MetricsElasticSearch.BATCH_SIZE
     batch_counter = 0
     self._es.indices.refresh(index_name)
+
+    # Determine how much work to do
     unprocessed_count = self.countUnprocessedEvents(index_name)
     self._L.info("Unprocessed events = %d", unprocessed_count)
     total_batches = unprocessed_count / batch_size + bool(unprocessed_count % batch_size)
     self._L.info("Number of batches = %d at %d per batch", total_batches, batch_size)
     if dry_run:
       return 0
+    # keep working until the work is completed
     while True:
+      # refresh any index caching so the event list reflects any additions or updates
       self._es.indices.refresh(index_name)
+
+      # find the first event with no session info computed
+      # mark is a datetime
       mark = self.getFirstUnprocessedEventDatetime(index_name)
       if mark is None:
         self._L.info("Completed computeSessions.")
         return 0
       self._L.info("At mark: %s", mark.isoformat())
+
+      # get a list of the active sessions
       live_sessions = self.getLiveSessionsBeforeMark(index_name, mark)
       self._L.debug(json.dumps(live_sessions))
+
+      # get a batch of events to process
       new_events = self.getNewEvents(index_name, batch_size)
+
+      # Process the events by assigning them to existing sessions or starting new sessions.
       self._processNewEvents(index_name=index_name, new_events=new_events, live_sessions=live_sessions)
+
       batch_counter += 1
       self._L.info("Processed batch %d of %d", batch_counter, total_batches)
     return 1

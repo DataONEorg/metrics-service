@@ -8,12 +8,29 @@ for administering and inspecting metrics content.
 Installation
 ------------
 
-Needs Python3, postgresql.
+Needs Python3, postgresql, elasticsearch.
 
 Install the python bits::
 
   pip install -e .
 
+
+Elastic Search Actions
+----------------------
+
+Show the amount of work to do for session calculations::
+
+   d1metricses -l compute -Y
+
+
+Compute session info::
+
+   d1metricses -l compute -Y
+
+
+
+Database Actions
+----------------
 
 Create a database::
 
