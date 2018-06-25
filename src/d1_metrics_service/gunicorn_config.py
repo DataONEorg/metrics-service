@@ -66,7 +66,7 @@ backlog = 2048
 #
 
 workers = 3
-worker_class = 'sync'
+worker_class = 'gevent'
 worker_connections = 1000
 timeout = 120
 keepalive = 2
@@ -145,9 +145,9 @@ tmp_upload_dir = None
 #       A string of "debug", "info", "warning", "error", "critical"
 #
 
-errorlog = '../../logs/metrics_service_accesslogs'
-loglevel = 'info'
-accesslog = '../../logs/metrics_service_errorlogs'
+errorlog = '/var/log/metrics-service/metrics_service_access.log'
+loglevel = 'debug'
+accesslog = '/var/log/metrics-service/metrics_service_error.log'
 access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s"'
 
 #
