@@ -280,49 +280,97 @@ class MetricsDatabase(object):
     :return: None. Saves the citations in the Citation table of the MDC database
     '''
 
-    pids, dois, pref = self.getDOIs()
+    dois, pref = self.getDOIs()
     csr = self.getCursor()
     sql = "INSERT INTO CITATIONS(id, report, metadata, target_id, source_id, link_publication_date, origin, title, " +\
           "publisher, year_of_publishing) values ( DEFAULT,'"
 
     count = 0
+    hist = {}
     for i in pref:
-      res = requests.get("https://api.eventdata.crossref.org/v1/events/scholix?source=crossref&obj-id.prefix="+i)
-      dict = res.json()
-      for val in dict["message"]["link-packages"]:
-        if (val["Target"]["Identifier"]["ID"] in dois):
-          target_pid = val["Target"]["Identifier"]["ID"]
-          for i in pids:
-            if val["Target"]["Identifier"]["ID"] in i:
-              target_pid = i
-              break
-          try:
-            values = []
-            values.append(target_pid)
-            values.append("doi:"+val["Source"]["Identifier"]["ID"])
-            values.append(val["LinkPublicationDate"][:10])
-            metadata = requests.get("https://api.crossref.org/works/"+val["Source"]["Identifier"]["ID"]).json()
-            values.append(", ".join((i["given"] + " " + i["family"]) for i in metadata["message"]["author"]))
-            values.append(metadata["message"]["title"][0])
-            values.append(metadata["message"]["publisher"])
-            values.append(str(metadata["message"]["created"]["date-parts"][0][0]))
-            csr.execute(sql + dict + "','" + metadata + "','" + "','".join(values) + "');")
-            print("A new citation record inserted!")
+      print()
+      print("Executing for" , i)
 
-          except psycopg2.DatabaseError as e:
-            print('Database error!\n{0}' , e)
-          except psycopg2.OperationalError as e:
-            print('Operational error!\n{0}', e)
-          finally:
-            self.conn.commit()
+      res = requests.get("https://api.eventdata.crossref.org/v1/events/scholix?source=crossref&obj-id.prefix="+i)
+      results = res.json()
+      for val in results["message"]["link-packages"]:
+        for doi in dois:
+          if (val["Target"]["Identifier"]["ID"]).lower() in doi.lower():
+            target_pid = val["Target"]["Identifier"]["ID"]
+            source_pid = val["Source"]["Identifier"]["ID"]
+            count = count + 1
+            # print()
+            # print("Target {0:0=3d}".format(count), " - ", target_pid)
+            # print("Source {0:0=3d}".format(count), " - ", source_pid)
+            try:
+              url = 'https://doi.org/' + target_pid
+              headers = {'Accept': 'application/x-bibtex'}
+
+              values = []
+              values.append(target_pid)
+              values.append(source_pid)
+              values.append(val["LinkPublicationDate"][:10])
+              mdata = requests.get(url, headers=headers)
+              if(mdata.status_code == 404):
+                agency = requests.get("https://api.crossref.org/works/"+source_pid+"/agency/")
+                agency_body = agency.json()
+                if(agency_body["message"]["agency"]["label"] == "DataCite"):
+                  print("DataCite")
+                  mdata = requests.get("https://api.datacite.org/works/"+source_pid)
+                  metadata = mdata.json()
+                  author = []
+                  for i in metadata["data"]["attributes"]["author"]:
+                    if "given" in i:
+                      author.append((i["given"] + " " + i["family"]))
+                    else:
+                      author.append('')
+                  values.append(", ".join(author).replace("'", r"''"))
+                  values.append((metadata["data"]["attributes"]["title"]).replace("'", r"''"))
+                  values.append((metadata["data"]["attributes"]["container-title"]).replace("'", r"''"))
+                  values.append(str(metadata["data"]["attributes"]["published"]))
+                if (agency_body["message"]["agency"]["label"] == "Crossref"):
+                  print("Crossref")
+                  mdata = requests.get("https://api.crossref.org/works/" + source_pid)
+                  metadata = mdata.json()
+                  values.append((", ".join((i["given"] + " " + i["family"]) for i in metadata["message"]["author"])).replace("'",r"''"))
+                  values.append((metadata["message"]["title"][0]).replace("'", r"''"))
+                  values.append((metadata["message"]["publisher"]).replace("'", r"''"))
+                  values.append(str(metadata["message"]["created"]["date-parts"][0][0]))
+              else:
+                # Format the response retrieved from the doi resolving endpoint and save it to a dictionary
+                print("DOI Endpoint")
+                mdata_resp = mdata.text[6:-1]
+                mdata_list = mdata_resp.split("\n")
+                metadata = {}
+                for i in mdata_list:
+                  key = i.split("=")
+                  if len(key) > 1:
+                    key[0] = key[0].strip()
+                    metadata[key[0]] = key[1][key[1].find("{")+1:key[1].rfind("}")]
+                values.append(metadata["author"].replace("'", r"''"))
+                values.append(metadata["title"].replace("'", r"''"))
+                values.append(metadata["publisher"].replace("'", r"''"))
+                values.append(metadata["year"].replace("'", r"''"))
+              csr.execute(sql + (json.dumps(results)).replace("'", r"''") + "','" + (json.dumps(metadata)).replace("'", r"''") + "','" + "','".join(values) + "');")
+              print("A new citation record inserted!")
+              pass
+            except psycopg2.DatabaseError as e:
+              print('Database error!\n{0}' , e)
+              print()
+            except psycopg2.OperationalError as e:
+              print('Operational error!\n{0}', e)
+              print()
+            finally:
+              self.conn.commit()
+              pass
+            break
 
     print("Queries executed!")
     return
 
-
   def updateCitationMetadata(self):
     """
-    This function queries the Crossref end point for metadata of the sources that cited our datasets.
+    This function queries the Crossref end poi for metadata of the sources that cited our datasets.
     This is meant to keep the metadata up to ddate in our system.
     :return:
     """
@@ -346,15 +394,53 @@ class MetricsDatabase(object):
 
 
     for doi in pref:
-      metadata = requests.get("https://api.crossref.org/works/" + doi).json()
       try:
         values = []
-        condition = "WHERE source_id = '" + "doi:" + doi + "'"
-        values.append(", ".join((i["given"] + " " + i["family"]) for i in metadata["message"]["author"]))
-        values.append(metadata["message"]["title"][0])
-        values.append(metadata["message"]["publisher"])
-        values.append(str(metadata["message"]["created"]["date-parts"][0][0]))
-
+        url = 'https://doi.org/' + doi
+        headers = {'Accept': 'application/x-bibtex'}
+        mdata = requests.get(url, headers=headers)
+        if (mdata.status_code == 404):
+          agency = requests.get("https://api.crossref.org/works/" + doi + "/agency/")
+          agency_body = agency.json()
+          if (agency_body["message"]["agency"]["label"] == "DataCite"):
+            print("DataCite")
+            mdata = requests.get("https://api.datacite.org/works/" + doi)
+            metadata = mdata.json()
+            author = []
+            for i in metadata["data"]["attributes"]["author"]:
+              if "given" in i:
+                author.append((i["given"] + " " + i["family"]))
+              else:
+                author.append(i["literal"])
+            values.append(", ".join(author).replace("'", r"''"))
+            values.append((metadata["data"]["attributes"]["title"]).replace("'", r"''"))
+            values.append((metadata["data"]["attributes"]["container-title"]).replace("'", r"''"))
+            values.append(str(metadata["data"]["attributes"]["published"]))
+          if (agency_body["message"]["agency"]["label"] == "Crossref"):
+            print("Crossref")
+            mdata = requests.get("https://api.datacite.org/works/" + doi)
+            metadata = mdata.json()
+            values.append(
+              (", ".join((i["given"] + " " + i["family"]) for i in metadata["message"]["author"])).replace("'", r"''"))
+            values.append((metadata["message"]["title"][0]).replace("'", r"''"))
+            values.append((metadata["message"]["publisher"]).replace("'", r"''"))
+            values.append(str(metadata["message"]["created"]["date-parts"][0][0]))
+        else:
+          # Format the response retrieved from the doi resolving endpoint and save it to a dictionary
+          print("DOI Endpoint")
+          mdata_resp = mdata.text[6:-1]
+          mdata_list = mdata_resp.split("\n")
+          metadata = {}
+          for i in mdata_list:
+            key = i.split("=")
+            if len(key) > 1:
+              key[0] = key[0].strip()
+              metadata[key[0]] = key[1][key[1].find("{") + 1:key[1].rfind("}")]
+          values.append(metadata["author"].replace("'", r"''"))
+          values.append(metadata["title"].replace("'", r"''"))
+          values.append(metadata["publisher"].replace("'", r"''"))
+          values.append(metadata["year"].replace("'", r"''"))
+        condition = "WHERE source_id = '" + doi + "'"
         csr.execute(sql + "', '".join(values) + "')" + condition + ";")
         print("Record updated")
 
@@ -376,18 +462,17 @@ class MetricsDatabase(object):
     """
     cd = solrclient.SolrClient('https://cn.dataone.org/cn/v2/query', 'solr')
     data = cd.getFieldValues('id', q='id:*doi*')
-    res = []
     prefixes = []
-    pids = []
+    doi = []
     for hit in data['id'][::2]:
       start_doi = hit.index("10.")
-      res.append(hit[start_doi:])
-      pids.append(hit)
+      doi.append(hit)
       prefixes.append(hit[start_doi:start_doi+7])
-    pids = set(pids)
-    dois = set(res)
+    dois = set(doi)
     pref = set(prefixes)
-    return pids, dois, pref
+    print(pref)
+    return dois, pref
+
 
 
 
