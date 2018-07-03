@@ -19,8 +19,8 @@ DEFAULT_REPORT_CONFIGURATION={
 class MetricsReader:
     """
     This class parses the metricsRequest obeject
-    and based on the filters queries the appropriate
-    method of the ApplicationDAO class.
+    and based on the filters queries the Elastic Search for
+    results
     """
     request = {}
     response = {}
@@ -185,13 +185,18 @@ class MetricsReader:
         metrics_database = MetricsDatabase()
         metrics_database.connect()
         csr = metrics_database.getCursor()
-        sql = 'SELECT * FROM citations WHERE target_id IN (\'' + '\',\''.join(PIDs) +  '\');'
-        link_publication_date = []
+        sql = 'SELECT TARGET_ID FROM citations;'
+        target_ids = []
         try:
             csr.execute(sql)
             rows = csr.fetchall()
             for i in rows:
-                link_publication_date.append(i[-1][:7])
+                for j in PIDs:
+                    # print(i[0])
+                    # print(j)
+                    if i[0].lower() in j.lower():
+                        print("Yes")
+                        target_ids.append(i[0])
         except Exception as e:
             print('Database error!\n{0}', e)
         finally:
@@ -212,12 +217,19 @@ class MetricsReader:
             pass
 
         # adding citation metric
-        for i in records:
-            # if(i in link_publication_date):
-                for countries in records[i]:
-                    # Assigining the citation to each of the country for now.
-                    # TODO: Discuss with the team about this.
-                    records[i][countries]["citations"] = link_publication_date.count(i)
+        citationMonth = datetime.now().strftime('%Y-%m')
+        # records[citationMonth]["USA"]["citations"] = len(target_ids)
+        if citationMonth in records:
+            if "USA" in records[citationMonth]:
+                # Assigining the citation to each of the country for now.
+                # TODO: Discuss with the team about this.
+                records[citationMonth]["USA"]["citations"] = len(target_ids)
+        else:
+            records[citationMonth] = {
+                "USA": {
+                    "citations": len(target_ids)
+                }
+            }
 
         # Parse the dictionary to form the expected output in the form of lists
         for months in records:
@@ -232,21 +244,23 @@ class MetricsReader:
                 # Views for the given time period.
                 # Note: Combining Views + Downloads
                 if "views" in records[months][country]:
-                    if "downloads" in records[months][country]:
-                        results["views"].append(records[months][country]["downloads"] + records[months][country]["views"])
-                    else:
-                        results["views"].append(records[months][country]["views"])
+                    results["views"].append(records[months][country]["views"])
                 else:
-                    if "downloads" in records[months][country]:
-                        results["views"].append(records[months][country]["downloads"])
-                    else:
-                        results["views"].append(0)
+                    results["views"].append(0)
 
                 if "citations" in records[months][country]:
                     results["citations"].append(records[months][country]["citations"])
                 else:
                     results["citations"].append(0)
-                    print("Not in range ", )
+
+        #If no log entry found in the ES
+        if((len(results["months"])) == 0):
+            results["months"] = 0
+            results["country"] = 0
+            results["downloads"] = 0
+            results["views"] = 0
+            results["citations"] = 0
+
 
         return results
 
