@@ -42,7 +42,7 @@ class MetricsReader:
         query_param = urlparse(unquote(req.url))
 
         if ("=" in query_param.query):
-            metrics_request = json.loads((query_param.query).split("=")[1])
+            metrics_request = json.loads((query_param.query).split("=", 1)[1])
             resp.body = json.dumps(self.process_request(metrics_request), ensure_ascii=False)
         else:
             resp.body = json.dumps(metrics_request, ensure_ascii=False)
@@ -275,7 +275,7 @@ class MetricsReader:
         # get the ids for all the previous versions and their data / metadata object till the current `pid` version
         # p.s. this might not be the latest version!
         for i in PIDs:
-            queryString = 'q=id:"' + i + '"&fl=documents,obsoletes&wt=json'
+            queryString = 'q=id:"' + i + '"&fl=documents,obsoletes,resourceMap&wt=json'
             response = requests.get(url=self._config["solr_query_url"], params=queryString).json()
             if(response["response"]["numFound"] > 0):
                 # Checks if the pid has any data / metadata objects
@@ -288,5 +288,10 @@ class MetricsReader:
                 if "obsoletes" in response["response"]["docs"][0]:
                     if response["response"]["docs"][0]["obsoletes"] not in PIDs:
                         PIDs.append(response["response"]["docs"][0]["obsoletes"])
+
+                # Checks for the resource maps of the pid
+                if "resourceMap" in response["response"]["docs"][0]:
+                    if response["response"]["docs"][0]["resourceMap"] not in PIDs:
+                        PIDs.append(response["response"]["docs"][0]["resourceMap"])
         # return response.json()
         return PIDs
