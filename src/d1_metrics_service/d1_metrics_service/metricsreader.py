@@ -291,7 +291,8 @@ class MetricsReader:
 
                 # Checks for the resource maps of the pid
                 if "resourceMap" in response["response"]["docs"][0]:
-                    if response["response"]["docs"][0]["resourceMap"] not in PIDs:
-                        PIDs.append(response["response"]["docs"][0]["resourceMap"])
+                    for j in response["response"]["docs"][0]["resourceMap"]:
+                        if j not in PIDs:
+                            PIDs.append(j)
         # return response.json()
         return PIDs
