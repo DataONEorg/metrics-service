@@ -5,6 +5,7 @@ import json
 import falcon
 from urllib.parse import urlparse
 from urllib.parse import unquote
+from urllib.parse import quote_plus
 import requests
 from d1_metrics.metricselasticsearch import MetricsElasticSearch
 from d1_metrics.metricsdatabase import MetricsDatabase
@@ -242,7 +243,6 @@ class MetricsReader:
                     results["downloads"].append(0)
 
                 # Views for the given time period.
-                # Note: Combining Views + Downloads
                 if "views" in records[months][country]:
                     results["views"].append(records[months][country]["views"])
                 else:
@@ -274,25 +274,45 @@ class MetricsReader:
 
         # get the ids for all the previous versions and their data / metadata object till the current `pid` version
         # p.s. this might not be the latest version!
-        for i in PIDs:
-            queryString = 'q=id:"' + i + '"&fl=documents,obsoletes,resourceMap&wt=json'
+
+        callSolr = True
+        while(callSolr):
+            # Querying for all the PIDs that we got from the previous iteration
+            # Would be a single PID if this is the first iteration.
+            identifier = '(("' + '") OR ("'.join(PIDs) + '"))'
+
+            # Forming the query string and url encoding the identifier to escape special chartacters
+            queryString = 'fq=id:' + quote_plus(identifier) + '&fl=documents,obsoletes,resourceMap&wt=json'
+
+            # Querying SOLR
             response = requests.get(url=self._config["solr_query_url"], params=queryString).json()
-            if(response["response"]["numFound"] > 0):
+
+            for doc in response["response"]["docs"]:
                 # Checks if the pid has any data / metadata objects
-                if "documents" in response["response"]["docs"][0]:
-                    for j in response["response"]["docs"][0]["documents"]:
+                if "documents" in doc:
+                    for j in doc["documents"]:
                         if j not in PIDs:
                             PIDs.append(j)
 
                 # Checks for the previous versions of the pid
-                if "obsoletes" in response["response"]["docs"][0]:
-                    if response["response"]["docs"][0]["obsoletes"] not in PIDs:
-                        PIDs.append(response["response"]["docs"][0]["obsoletes"])
+                if "obsoletes" in doc:
+                    if doc["obsoletes"] not in PIDs:
+                        PIDs.append(doc["obsoletes"])
 
                 # Checks for the resource maps of the pid
-                if "resourceMap" in response["response"]["docs"][0]:
-                    for j in response["response"]["docs"][0]["resourceMap"]:
+                if "resourceMap" in doc:
+                    for j in doc["resourceMap"]:
                         if j not in PIDs:
                             PIDs.append(j)
-        # return response.json()
+            if(prevLength == len(PIDs)):
+                callSolr = False
+
+
+        print(PIDs)
+
         return PIDs
+
+
+if __name__ == "__main__":
+    mr = MetricsReader()
+    mr.resolvePIDs(["urn:node:KNB.14618012"])
