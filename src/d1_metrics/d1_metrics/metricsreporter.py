@@ -24,7 +24,7 @@ DEFAULT_REPORT_CONFIGURATION={
     "report_id" : datetime.today().strftime('%Y-%m-%d'),
     "release" : "RD1",
     "created_by" : "DataONE",
-    "solr_query_url": "https://cn.dataone.org/cn/v2/query/solr/?"
+    "solr_query_url": "https://cn.dataone.org/cn/v2/query/solr/"
 }
 
 
@@ -367,9 +367,6 @@ class MetricsReporter(object):
                 pid_list.append(pid)
                 pid_list = self.resolvePIDs(pid_list)
 
-                print(json.dumps(pid_list, indent=2))
-
-
                 for i in pid_list:
                     if i in unique_pids:
                         unique_pids.remove(i)
@@ -409,9 +406,6 @@ class MetricsReporter(object):
             report_datasets.append(dataset)
             # print(json.dumps(dataset, indent=2))
 
-            if (count == 10):
-                break
-
         return (report_datasets)
 
 
@@ -438,41 +432,48 @@ class MetricsReporter(object):
         # get the ids for all the previous versions and their data / metadata object till the current `pid` version
         # p.s. this might not be the latest version!
         callSolr = True
+
         while (callSolr):
+
             # Querying for all the PIDs that we got from the previous iteration
             # Would be a single PID if this is the first iteration.
             identifier = '(("' + '") OR ("'.join(PIDs) + '"))'
 
-            # Forming the query string and url encoding the identifier to escape special chartacters
-            queryString = 'fq=id:' + quote_plus(identifier) + '&fl=documents,obsoletes,resourceMap&wt=json'
-            print(queryString)
+            # Forming the query dictionary to be sent as a file to the Solr endpoint via the HTTP Post request.
+            queryDict =  {}
+            queryDict["fq"] = (None, 'id:' + identifier)
+            queryDict["fl"] =  (None, 'id,documents,documentedBy,obsoletes,resourceMap')
+            queryDict["wt"] = (None, "json")
 
             # Getting length of the array from previous iteration to control the loop
             prevLength = len(PIDs)
 
-            # Querying SOLR
-            response = requests.get(url=self._config["solr_query_url"], params=queryString).json()
+            resp = requests.post(url=self._config["solr_query_url"], files=queryDict)
 
-            for doc in response["response"]["docs"]:
-                # Checks if the pid has any data / metadata objects
-                if "documents" in doc:
-                    for j in doc["documents"]:
-                        if j not in PIDs:
-                            PIDs.append(j)
+            if(resp.status_code == 200):
 
-                # Checks for the previous versions of the pid
-                if "obsoletes" in doc:
-                    if doc["obsoletes"] not in PIDs:
-                        PIDs.append(doc["obsoletes"])
+                response = resp.json()
 
-                # Checks for the resource maps of the pid
-                if "resourceMap" in doc:
-                    for j in doc["resourceMap"]:
-                        if j not in PIDs:
-                            PIDs.append(j)
+                for doc in response["response"]["docs"]:
+                    # Checks if the pid has any data / metadata objects
+                    if "documents" in doc:
+                        for j in doc["documents"]:
+                            if j not in PIDs:
+                                PIDs.append(j)
+
+                    # Checks for the previous versions of the pid
+                    if "obsoletes" in doc:
+                        if doc["obsoletes"] not in PIDs:
+                            PIDs.append(doc["obsoletes"])
+
+                    # Checks for the resource maps of the pid
+                    if "resourceMap" in doc:
+                        for j in doc["resourceMap"]:
+                            if j not in PIDs:
+                                PIDs.append(j)
+
             if (prevLength == len(PIDs)):
                 callSolr = False
-
         return PIDs
 
 
@@ -516,12 +517,12 @@ class MetricsReporter(object):
         Probably would be called only once in its lifetime
         :return: None
         """
-        date = datetime(2018, 5, 15)
+        date = datetime(2018, 5, 1)
+
         count = 0
         while (date != datetime.today().strftime('%Y-%m-%d')):
-            count = count + 1
-            if(count == 10):
-                break
+            count  = count + 1
+
             prevDate = date
             date += timedelta(days=1)
 
@@ -539,6 +540,7 @@ if __name__ == "__main__":
   # md.get_report_datasets("05/01/2018", "05/31/2018")
   # md.resolve_MN("urn:node:KNB")
   # md.query_solr("df35b.302.1")
-  # md.report_handler("05/19/2018", "05/20/2018")
+  # md.report_handler("05/01/2018", "05/30/2018")
   # md.get_unique_pids("05/01/2018", "05/31/2018")
-  md.scheduler()
+  # md.scheduler()
+  # md.resolvePIDs(["doi:10.18739/A2X65H"])

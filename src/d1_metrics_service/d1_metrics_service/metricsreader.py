@@ -12,9 +12,11 @@ from d1_metrics.metricsdatabase import MetricsDatabase
 from datetime import datetime
 
 
+
 DEFAULT_REPORT_CONFIGURATION={
     "solr_query_url": "https://cn.dataone.org/cn/v2/query/solr/?"
 }
+
 
 
 class MetricsReader:
@@ -52,6 +54,8 @@ class MetricsReader:
         # status returned by the framework, but it is included here to
         # illustrate how this may be overridden as needed.
         resp.status = falcon.HTTP_200
+
+
 
     def on_post(self, req, resp):
         """
@@ -92,6 +96,8 @@ class MetricsReader:
         self.response["results"] = results
 
         return self.response
+
+
 
     def getSummaryMetricsPerDataset(self, PIDs):
         """
@@ -163,6 +169,7 @@ class MetricsReader:
                                                                      end_date=datetime.strptime(end_date,'%m/%d/%Y'))
 
         return (self.formatData(data, PIDs))
+
 
 
     def formatData(self, data, PIDs):
@@ -265,6 +272,7 @@ class MetricsReader:
         return results
 
 
+
     def resolvePIDs(self, PIDs):
         """
         Checks for the versions and obsolecence chain of the given PID
@@ -276,41 +284,50 @@ class MetricsReader:
         # p.s. this might not be the latest version!
 
         callSolr = True
-        while(callSolr):
+
+        while (callSolr):
             # Querying for all the PIDs that we got from the previous iteration
             # Would be a single PID if this is the first iteration.
             identifier = '(("' + '") OR ("'.join(PIDs) + '"))'
 
-            # Forming the query string and url encoding the identifier to escape special chartacters
-            queryString = 'fq=id:' + quote_plus(identifier) + '&fl=documents,obsoletes,resourceMap&wt=json'
+            # Forming the query dictionary to be sent as a file to the Solr endpoint via the HTTP Post request.
+            queryDict =  {}
+            queryDict["fq"] = (None, 'id:' + identifier)
+            queryDict["fl"] =  (None, 'id,documents,documentedBy,obsoletes,resourceMap')
+            queryDict["wt"] = (None, "json")
 
-            # Querying SOLR
-            response = requests.get(url=self._config["solr_query_url"], params=queryString).json()
+            # Getting length of the array from previous iteration to control the loop
+            prevLength = len(PIDs)
 
-            for doc in response["response"]["docs"]:
-                # Checks if the pid has any data / metadata objects
-                if "documents" in doc:
-                    for j in doc["documents"]:
-                        if j not in PIDs:
-                            PIDs.append(j)
+            resp = requests.post(url=self._config["solr_query_url"], files=queryDict)
 
-                # Checks for the previous versions of the pid
-                if "obsoletes" in doc:
-                    if doc["obsoletes"] not in PIDs:
-                        PIDs.append(doc["obsoletes"])
+            if(resp.status_code == 200):
 
-                # Checks for the resource maps of the pid
-                if "resourceMap" in doc:
-                    for j in doc["resourceMap"]:
-                        if j not in PIDs:
-                            PIDs.append(j)
-            if(prevLength == len(PIDs)):
+                response = resp.json()
+
+                for doc in response["response"]["docs"]:
+                    # Checks if the pid has any data / metadata objects
+                    if "documents" in doc:
+                        for j in doc["documents"]:
+                            if j not in PIDs:
+                                PIDs.append(j)
+
+                    # Checks for the previous versions of the pid
+                    if "obsoletes" in doc:
+                        if doc["obsoletes"] not in PIDs:
+                            PIDs.append(doc["obsoletes"])
+
+                    # Checks for the resource maps of the pid
+                    if "resourceMap" in doc:
+                        for j in doc["resourceMap"]:
+                            if j not in PIDs:
+                                PIDs.append(j)
+
+            if (prevLength == len(PIDs)):
                 callSolr = False
 
-
-        print(PIDs)
-
         return PIDs
+
 
 
 if __name__ == "__main__":
