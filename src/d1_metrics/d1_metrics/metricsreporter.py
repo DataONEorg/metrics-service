@@ -404,7 +404,6 @@ class MetricsReporter(object):
                 continue
 
             report_datasets.append(dataset)
-            # print(json.dumps(dataset, indent=2))
 
         return (report_datasets)
 

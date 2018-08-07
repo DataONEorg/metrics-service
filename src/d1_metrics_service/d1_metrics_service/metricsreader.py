@@ -200,10 +200,7 @@ class MetricsReader:
             rows = csr.fetchall()
             for i in rows:
                 for j in PIDs:
-                    # print(i[0])
-                    # print(j)
                     if i[0].lower() in j.lower():
-                        print("Yes")
                         target_ids.append(i[0])
         except Exception as e:
             print('Database error!\n{0}', e)
