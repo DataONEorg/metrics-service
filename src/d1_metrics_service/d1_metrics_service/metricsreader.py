@@ -202,6 +202,8 @@ class MetricsReader:
                 for j in PIDs:
                     if i[0].lower() in j.lower():
                         target_ids.append(i[0])
+                    # We don't want to add duplicate citations for all the objects of the dataset
+                    break
         except Exception as e:
             print('Database error!\n{0}', e)
         finally:
