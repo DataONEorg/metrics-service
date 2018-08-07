@@ -520,7 +520,7 @@ class MetricsReporter(object):
         date = datetime(2018, 5, 1)
 
         count = 0
-        while (date != datetime.today().strftime('%Y-%m-%d')):
+        while (date.strftime('%Y-%m-%d') != datetime.today().strftime('%Y-%m-%d')):
             count  = count + 1
 
             prevDate = date
