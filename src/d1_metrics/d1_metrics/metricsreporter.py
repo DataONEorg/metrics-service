@@ -21,7 +21,6 @@ DEFAULT_REPORT_CONFIGURATION={
     "report_url" : "https://metrics.test.datacite.org/reports",
     "auth_token" : "",
     "report_name" : "Dataset Master Report",
-    "report_id" : datetime.today().strftime('%Y-%m-%d'),
     "release" : "RD1",
     "created_by" : "DataONE",
     "solr_query_url": "https://cn.dataone.org/cn/v2/query/solr/"
@@ -46,7 +45,7 @@ class MetricsReporter(object):
         json_object = {}
         json_object["report-header"] = self.get_report_header(start_date, end_date)
         json_object["report-datasets"] = self.get_report_datasets(start_date, end_date)
-        with open('./reports/' + (datetime.strptime(end_date,'%m/%d/%Y').strftime('%Y-%m-%d'))+'.json', 'w') as outfile:
+        with open('./reports/' + ("DSR-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d-%H-%M'))+'.json', 'w') as outfile:
             print("Writing to file")
             json.dump(json_object, outfile, indent=2,ensure_ascii=False)
         # self.send_reports()
@@ -62,7 +61,7 @@ class MetricsReporter(object):
         """
         report_header = {}
         report_header["report-name"] = self._config["report_name"]
-        report_header["report-id"] = "DSR-" + datetime.today().strftime('%Y-%m-%d-%H-%M')
+        report_header["report-id"] = "DSR-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d-%H-%M')
         report_header["release"] = self._config["release"]
         report_header["reporting-period"] = [
 			  {
@@ -72,7 +71,7 @@ class MetricsReporter(object):
 				"end-date" : (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
 			  }
 		]
-        report_header["created"] = self._config["report_id"]
+        report_header["created"] = datetime.today().strftime('%Y-%m-%d-%H-%M')
         report_header["created-by"] = self._config["created_by"]
         report_header["report-filters"] = []
         report_header["report-attributes"] = []
@@ -101,9 +100,6 @@ class MetricsReporter(object):
             },
             {
                 "term": {"event.key": "read"}
-            },
-            {
-                "term": {"inFullRobotList": "false"}
             },
             {
                 "exists": {
@@ -145,10 +141,15 @@ class MetricsReporter(object):
                 }
             },
             {
-                "term": {"event.key": "read"}
+                "terms": {
+                    "formatType": [
+                        "METADATA",
+                        "DATA"
+                    ]
+                }
             },
             {
-                "term": {"inFullRobotList": "false"}
+                "term": {"event.key": "read"}
             },
             {
                 "exists": {
@@ -367,10 +368,6 @@ class MetricsReporter(object):
                 pid_list.append(pid)
                 pid_list = self.resolvePIDs(pid_list)
 
-                for i in pid_list:
-                    if i in unique_pids:
-                        unique_pids.remove(i)
-
                 report_instances = self.generate_instances(start_date, end_date, pid_list)
 
                 if ("METADATA" in report_instances):
@@ -541,5 +538,5 @@ if __name__ == "__main__":
   # md.query_solr("df35b.302.1")
   # md.report_handler("05/01/2018", "05/30/2018")
   # md.get_unique_pids("05/01/2018", "05/31/2018")
-  # md.scheduler()
+  md.scheduler()
   # md.resolvePIDs(["doi:10.18739/A2X65H"])
