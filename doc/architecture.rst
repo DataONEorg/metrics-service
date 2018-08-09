@@ -10,7 +10,7 @@ Component Diagram
 
     !include plantuml-styles.txt
     
-    left to right direction
+    top to bottom direction
     
     ' For component diagram help see http://plantuml.com/component-diagram
     ' Define the components
@@ -19,16 +19,16 @@ Component Diagram
     MN
     +
     CN
-    logs
+    events
     ]
 
     frame "CN Stage Server" as "cnserv" <<Server>> {
         frame "Log Aggregation" as "logagg" {
-            [Log Aggregation Index] <<Service>>
+            [Log Aggregation] <<Service>>
         }
         
-        folder "Script" as script{
-            component [d1logagg.py] <<Script>>
+        database "logsolr" {
+
         }
         
         folder "Logs" as logs{
@@ -48,33 +48,24 @@ Component Diagram
         component [Log Stash] <<ELK Stack Service>>
         
         component [Elastic Search] <<ELK Stack Service>>
-        
-        folder "Maintenance Script" as mainScript{
-            component [Ed's index maintenance.py] <<Script>>
-        }
-        
-        database "PostGresQL" {
-
-        }
     }
 
-    
+    component comp2 [
+    Metrics Service
+    ]
     
     
     ' Define the interactions
-    comp1 --> [Log Aggregation Index]: ""
-    [Log Aggregation Index] -left-> script:  ""
-    script -down-> logs: manual execution
+    comp1 --> [Log Aggregation]: ""
+    [Log Aggregation] -down-> logs: "Writing to disk in JSON format"
+    [Log Aggregation] --> logsolr: "Saving logs to logsolr index"
     logs -down-> [File Beat Stream]:  ""
     apache -up->  [File Beat Stream] : ""
     [Log Stash] .up. TCP : ""
     TCP .up.> [File Beat Stream] : ""
-    [Log Stash] --> [Log Stash] : ""
+    [Log Stash] --> [Log Stash] : "Filtering and Session Calculation"
     [Log Stash] --> [Elastic Search] : ""
-    [Elastic Search] --> mainScript : ""
-    mainScript --> [Elastic Search] : ""
-    [Elastic Search] --> PostGresQL : ""
-    
+    comp2 -right-> [Elastic Search] : "Query for the log records"
 
 
     
