@@ -27,6 +27,7 @@ class MetricsServiceManager(object):
     def run(self):
         metrics_database = MetricsDatabase()
         metrics_reporter = MetricsReporter()
+        schedule.every(1).minute.do(job_func=self.job())
         schedule.every().hour.do(job_func=self.job())
         schedule.every().day.at("00:30").do(job_func=self.job())
         # schedule.every().day.at("01:30").do(job_func=metrics_reporter.scheduler())
