@@ -18,7 +18,7 @@ class MetricsServiceManager(object):
     def __init__(self):
         pass
 
-    def job():
+    def job(self):
         with open("test.txt", "a") as myfile:
             myfile.write("I'm still working at")
             myfile.write(datetime.now().strftime('%m/%d/%Y'))
@@ -27,9 +27,9 @@ class MetricsServiceManager(object):
     def run(self):
         metrics_database = MetricsDatabase()
         metrics_reporter = MetricsReporter()
-        schedule.every(1).minute.do(job_func=self.job())
-        schedule.every().hour.do(job_func=self.job())
-        schedule.every().day.at("00:30").do(job_func=self.job())
+        schedule.every(1).minute.do(job_func=self.job)
+        schedule.every().hour.do(job_func=self.job)
+        schedule.every().day.at("00:30").do(job_func=self.job)
         # schedule.every().day.at("01:30").do(job_func=metrics_reporter.scheduler())
         # schedule.every().day.at("02:30").do(job_func=metrics_database.getCitations())
         while True:
