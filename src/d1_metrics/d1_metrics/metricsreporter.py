@@ -480,7 +480,7 @@ class MetricsReporter(object):
         """
         s = requests.session()
         s.headers.update(
-            {'Authorization': f'Bearer {self._config["auth_token"]}', 'Content-Type': 'application/json', 'Accept': 'application/json'})
+            {'Authorization': "Bearer " +  self._config["auth_token"], 'Content-Type': 'application/json', 'Accept': 'application/json'})
         with open(self._config["report_id"]+'.json', 'r') as content_file:
             content = content_file.read()
         r = s.post(self._config["report_url"], data=content.encode("utf-8"))
