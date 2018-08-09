@@ -61,7 +61,7 @@ class MetricsReporter(object):
         """
         report_header = {}
         report_header["report-name"] = self._config["report_name"]
-        report_header["report-id"] = "DSR-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d-%H-%M')
+        report_header["report-id"] = "DSR-" + end_date.strftime('%Y-%m-%d-%H-%M')
         report_header["release"] = self._config["release"]
         report_header["reporting-period"] = [
 			  {
@@ -71,7 +71,7 @@ class MetricsReporter(object):
 				"end-date" : (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
 			  }
 		]
-        report_header["created"] = datetime.today().strftime('%Y-%m-%d-%H-%M')
+        report_header["created"] = self._config["report_id"]
         report_header["created-by"] = self._config["created_by"]
         report_header["report-filters"] = []
         report_header["report-attributes"] = []
