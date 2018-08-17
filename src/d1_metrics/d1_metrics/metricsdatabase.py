@@ -282,7 +282,7 @@ class MetricsDatabase(object):
 
     dois, pref = self.getDOIs()
     csr = self.getCursor()
-    sql = "INSERT INTO CITATIONS(id, report, metadata, target_id, source_id, link_publication_date, origin, title, " +\
+    sql = "INSERT INTO CITATIONS(id, report, metadata, target_id, source_id, source_url, link_publication_date, origin, title, " +\
           "publisher, year_of_publishing) values ( DEFAULT,'"
 
     count = 0
@@ -303,19 +303,19 @@ class MetricsDatabase(object):
             # print("Target {0:0=3d}".format(count), " - ", target_pid)
             # print("Source {0:0=3d}".format(count), " - ", source_pid)
             try:
-              url = 'https://doi.org/' + target_pid
+              url = val["Source"]["Identifier"]["IDUrl"]
               headers = {'Accept': 'application/x-bibtex'}
 
               values = []
               values.append(target_pid)
               values.append(source_pid)
+              values.append(url)
               values.append(val["LinkPublicationDate"][:10])
               mdata = requests.get(url, headers=headers)
               if(mdata.status_code == 404):
                 agency = requests.get("https://api.crossref.org/works/"+source_pid+"/agency/")
                 agency_body = agency.json()
                 if(agency_body["message"]["agency"]["label"] == "DataCite"):
-                  print("DataCite")
                   mdata = requests.get("https://api.datacite.org/works/"+source_pid)
                   metadata = mdata.json()
                   author = []
@@ -329,7 +329,6 @@ class MetricsDatabase(object):
                   values.append((metadata["data"]["attributes"]["container-title"]).replace("'", r"''"))
                   values.append(str(metadata["data"]["attributes"]["published"]))
                 if (agency_body["message"]["agency"]["label"] == "Crossref"):
-                  print("Crossref")
                   mdata = requests.get("https://api.crossref.org/works/" + source_pid)
                   metadata = mdata.json()
                   values.append((", ".join((i["given"] + " " + i["family"]) for i in metadata["message"]["author"])).replace("'",r"''"))
@@ -338,7 +337,6 @@ class MetricsDatabase(object):
                   values.append(str(metadata["message"]["created"]["date-parts"][0][0]))
               else:
                 # Format the response retrieved from the doi resolving endpoint and save it to a dictionary
-                print("DOI Endpoint")
                 mdata_resp = mdata.text[6:-1]
                 mdata_list = mdata_resp.split("\n")
                 metadata = {}
