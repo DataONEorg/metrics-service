@@ -112,7 +112,7 @@ class MetricsReader:
         :param PIDs:
         :return: A dictionary containing lists of all the facets specified in the metrics_request
         """
-        metrics_elastic_search = MetricsElasticSearch(PIDs)
+        metrics_elastic_search = MetricsElasticSearch()
         metrics_elastic_search.connect()
         search_body = [
             {
@@ -291,7 +291,7 @@ class MetricsReader:
                         results["citations"].append(0)
 
         for months, totals in citationDict.items():
-            if months not in results:
+            if months not in results["months"]:
                 results["months"].append(months)
                 if("country" in self.response["metricsRequest"]["groupBy"]):
                     results["country"].append("US")
@@ -317,20 +317,34 @@ class MetricsReader:
         :return: A list of pids for previous versions and their data + metadata objects
         """
 
+        PIDstring = PIDs[0]
+
         # get the ids for all the previous versions and their data / metadata object till the current `pid` version
         # p.s. this might not be the latest version!
 
-        callSolr = True
+        # fl = "documents, obsoletes, resourceMap"
+        # q = "{!join from=resourceMap to=resourceMap}"
 
+        queryString = 'q={!join from=resourceMap to=resourceMap}id:"' + PIDstring + '"&fl=id&wt=json'
+
+        resp = requests.get(url=self._config["solr_query_url"], params=queryString)
+
+        if (resp.status_code == 200):
+            PIDs = self.parseResponse(resp, PIDs)
+
+        callSolr = True
+        # print(PIDs)
+        # print(type(PIDs))
         while (callSolr):
+
             # Querying for all the PIDs that we got from the previous iteration
             # Would be a single PID if this is the first iteration.
             identifier = '(("' + '") OR ("'.join(PIDs) + '"))'
 
             # Forming the query dictionary to be sent as a file to the Solr endpoint via the HTTP Post request.
-            queryDict =  {}
-            queryDict["fq"] = (None, 'id:' + identifier)
-            queryDict["fl"] =  (None, 'id,documents,documentedBy,obsoletes,resourceMap')
+            queryDict = {}
+            queryDict["fq"] = (None, 'id:* AND resourceMap:' + identifier)
+            queryDict["fl"] = (None, 'id,documents,obsoletes,resourceMap')
             queryDict["wt"] = (None, "json")
 
             # Getting length of the array from previous iteration to control the loop
@@ -338,30 +352,42 @@ class MetricsReader:
 
             resp = requests.post(url=self._config["solr_query_url"], files=queryDict)
 
-            if(resp.status_code == 200):
-
-                response = resp.json()
-
-                for doc in response["response"]["docs"]:
-                    # Checks if the pid has any data / metadata objects
-                    if "documents" in doc:
-                        for j in doc["documents"]:
-                            if j not in PIDs:
-                                PIDs.append(j)
-
-                    # Checks for the previous versions of the pid
-                    if "obsoletes" in doc:
-                        if doc["obsoletes"] not in PIDs:
-                            PIDs.append(doc["obsoletes"])
-
-                    # Checks for the resource maps of the pid
-                    if "resourceMap" in doc:
-                        for j in doc["resourceMap"]:
-                            if j not in PIDs:
-                                PIDs.append(j)
+            if (resp.status_code == 200):
+                PIDs = self.parseResponse(resp, PIDs)
 
             if (prevLength == len(PIDs)):
                 callSolr = False
+
+
+        return PIDs
+
+
+
+    def parseResponse(self, resp, PIDs):
+        response = resp.json()
+
+
+        for doc in response["response"]["docs"]:
+            # Checks if the pid has any data / metadata objects
+            if "id" in doc:
+                if doc["id"] not in PIDs:
+                    PIDs.append(doc["id"])
+
+            if "documents" in doc:
+                for j in doc["documents"]:
+                    if j not in PIDs:
+                        PIDs.append(j)
+
+            # Checks for the previous versions of the pid
+            if "obsoletes" in doc:
+                if doc["obsoletes"] not in PIDs:
+                    PIDs.append(doc["obsoletes"])
+
+            # Checks for the resource maps of the pid
+            if "resourceMap" in doc:
+                for j in doc["resourceMap"]:
+                    if j not in PIDs:
+                        PIDs.append(j)
 
         return PIDs
 
