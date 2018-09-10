@@ -18,10 +18,10 @@ from d1_metrics.metricselasticsearch import MetricsElasticSearch
 from collections import Counter
 
 DEFAULT_REPORT_CONFIGURATION={
-    "report_url" : "https://metrics.test.datacite.org/reports",
-    "auth_token" : "",
+    "report_url" : "https://api.datacite.org/reports",
+    "auth_token" : "eyJhbGciOiJSUzI1NiJ9.eyJ1aWQiOiJkYXRhb25lIiwibmFtZSI6Ikpvc2lhaCBDYXJiZXJyeSIsInByb3ZpZGVyX2lkIjoiZGF0YWNpdGUiLCJjbGllbnRfaWQiOiJkYXRhb25lIiwicm9sZV9pZCI6InN0YWZmX2FkbWluIiwiaWF0IjoxNTIwNDczNDM3LCJleHAiOjE1MzYwMjU0Mzd9.dSBx5w0lGyKDcmVv4FxH6KgASPLmwRbwpiB12p3jPCkwJlG4NbYdqRtvFd5c86LtCmXwochwmRC97dU7YQE6TrkX3zpXI0hAJfALDfVlRkMvYaka7SbAMt3DKo8pcawzV6RXvyf8g_otULNyZ5Ayfg1CpxTkF9sIWacb_JNzb9mhndYe2eg821hTtho1yE0gaNd32of1fQdX2E2nCpKV4ly4-nuVZCb1RFj0i2f9JV51qVEWv3QF0s5fcaKWlZx26KdsNvuw_LBNlZs3IoLEvFjwSbnvS1qao1g49M5--Y1MHENN5QLVd-q8xTkFO9VTJWxp1czMF0kYlKrnpSvpPw",
     "report_name" : "Dataset Master Report",
-    "release" : "RD1",
+    "release" : "rd1",
     "created_by" : "DataONE",
     "solr_query_url": "https://cn.dataone.org/cn/v2/query/solr/"
 }
@@ -43,12 +43,13 @@ class MetricsReporter(object):
         """
         print("handling report for", start_date, end_date)
         json_object = {}
+        json_object["id"] = "DSR-D1-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
         json_object["report-header"] = self.get_report_header(start_date, end_date)
         json_object["report-datasets"] = self.get_report_datasets(start_date, end_date)
-        with open('./reports/' + ("DSR-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d-%H-%M'))+'.json', 'w') as outfile:
+        with open('./reports/' + ("DSR-D1-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d'))+'.json', 'w') as outfile:
             print("Writing to file")
             json.dump(json_object, outfile, indent=2,ensure_ascii=False)
-        # self.send_reports()
+        self.send_reports(start_date, end_date)
         return
 
 
@@ -61,17 +62,13 @@ class MetricsReporter(object):
         """
         report_header = {}
         report_header["report-name"] = self._config["report_name"]
-        report_header["report-id"] = "DSR-" + end_date.strftime('%Y-%m-%d-%H-%M')
+        report_header["report-id"] = "dsr"
         report_header["release"] = self._config["release"]
-        report_header["reporting-period"] = [
-			  {
-				"begin-date" : (datetime.strptime(start_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
-			  },
-			  {
-				"end-date" : (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
-			  }
-		]
-        report_header["created"] = self._config["report_id"]
+        report_header["reporting-period"] = {}
+        report_header["reporting-period"]["begin-date"] = (datetime.strptime(start_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
+        report_header["reporting-period"]["end-date"] = (datetime.strptime(end_date, '%m/%d/%Y')).strftime(
+            '%Y-%m-%d')
+        report_header["created"] = datetime.now().strftime('%Y-%m-%d')
         report_header["created-by"] = self._config["created_by"]
         report_header["report-filters"] = []
         report_header["report-attributes"] = []
@@ -323,45 +320,44 @@ class MetricsReporter(object):
                     dataset["publisher"] = self.resolve_MN(solr_response["response"]["docs"][0]["authoritativeMN"])
 
                 if ("authoritativeMN" in (i for i in solr_response["response"]["docs"][0])):
-                    dataset["publisher-id"] = {"type":"https://cn.dataone.org/cn/v2/node/", "value" :solr_response["response"]["docs"][0]["authoritativeMN"]}
+                    dataset["publisher-id"] = []
+                    dataset["publisher-id"].append({"type":"https://cn.dataone.org/cn/v2/node/", "value" :solr_response["response"]["docs"][0]["authoritativeMN"]})
 
                 dataset["platform"] = "DataONE"
 
                 if ("origin" in (i for i in solr_response["response"]["docs"][0])):
                     contributors = []
                     for i in solr_response["response"]["docs"][0]["origin"]:
-                        contributors.append({"type": "Name", "value": i})
-                    dataset["contributors"] = contributors
+                        contributors.append({"type": "name", "value": i})
+                    dataset["dataset-contributors"] = contributors
 
                 if ("datePublished" in (i for i in solr_response["response"]["docs"][0])):
-                    dataset["dataset-dates"] = {"type": "pub-date", "value" :solr_response["response"]["docs"][0]["datePublished"][:10]}
+                    dataset["dataset-dates"] = []
+                    dataset["dataset-dates"].append({"type": "pub-date", "value" :solr_response["response"]["docs"][0]["datePublished"][:10]})
                 else:
-                    dataset["dataset-dates"] = {"type": "pub-date", "value" :solr_response["response"]["docs"][0]["dateUploaded"][:10]}
+                    dataset["dataset-dates"] = []
+                    dataset["dataset-dates"].append({"type": "pub-date", "value" :solr_response["response"]["docs"][0]["dateUploaded"][:10]})
 
                 if "doi" in pid:
-                    dataset["dataset-id"] = [{"DOI": pid}]
+                    dataset["dataset-id"] = [{"type": "doi", "value": pid}]
                 else:
-                    dataset["dataset-id"] = [{"other-id": pid}]
+                    dataset["dataset-id"] = [{"type": "other-id", "value": pid}]
 
-                dataset["yop"] = dataset["dataset-dates"]["value"][:4]
+                dataset["yop"] = dataset["dataset-dates"][0]["value"][:4]
 
                 if ("dataUrl" in (i for i in solr_response["response"]["docs"][0])):
                     dataset["uri"] = solr_response["response"]["docs"][0]["dataUrl"]
 
-                dataset["data-type"] = "Dataset"
+                dataset["data-type"] = "dataset"
 
-                dataset["access-type"] = "regular"
+                dataset["access-method"] = "regular"
 
-                dataset["performance"] = {}
+                dataset["performance"] = []
+                performance = {}
 
-                dataset["performance"]["reporting-period"] = [
-                      {
-                        "begin-date" : (datetime.strptime(start_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
-                      },
-                      {
-                        "end-date" : (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
-                      }
-                ]
+                performance["period"] = {}
+                performance["period"]["begin-date"] = (datetime.strptime(start_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
+                performance["period"]["end-date"] = (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
 
                 instance = []
                 pid_list = []
@@ -393,7 +389,8 @@ class MetricsReporter(object):
                     instance.append(total_dataset_requests)
                     instance.append(unique_dataset_requests)
 
-                dataset["performance"]["instance"] = instance
+                    performance["instance"] = instance
+                    dataset["performance"].append(performance)
 
 
 
@@ -473,7 +470,7 @@ class MetricsReporter(object):
         return PIDs
 
 
-    def send_reports(self):
+    def send_reports(self,  start_date, end_date):
         """
         Sends report to the Hub at the specified Hub report url in the config parameters
         :return: Nothing
@@ -481,7 +478,7 @@ class MetricsReporter(object):
         s = requests.session()
         s.headers.update(
             {'Authorization': "Bearer " +  self._config["auth_token"], 'Content-Type': 'application/json', 'Accept': 'application/json'})
-        with open(self._config["report_id"]+'.json', 'r') as content_file:
+        with open("./reports/DSR-D1-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')+'.json', 'r') as content_file:
             content = content_file.read()
         r = s.post(self._config["report_url"], data=content.encode("utf-8"))
         print('Sending report to the hub')
@@ -513,10 +510,13 @@ class MetricsReporter(object):
         Probably would be called only once in its lifetime
         :return: None
         """
-        date = datetime(2018, 5, 1)
+        date = datetime(2012, 7, 1)
+        stopDate = datetime(2012, 12, 31)
 
         count = 0
-        while (date.strftime('%Y-%m-%d') != datetime.today().strftime('%Y-%m-%d')):
+        while (date.strftime('%Y-%m-%d') != stopDate.strftime('%Y-%m-%d')):
+            print(date.strftime('%Y-%m-%d'))
+            print(stopDate.strftime('%Y-%m-%d'))
             count  = count + 1
 
             prevDate = date
@@ -528,6 +528,10 @@ class MetricsReporter(object):
             self.report_handler(prevDate.strftime('%m/%d/%Y'), date.strftime('%m/%d/%Y'))
 
             print("Job ", count, " : ", prevDate, " to ", date)
+
+            if(count == 1):
+                break
+
 
 
 if __name__ == "__main__":
