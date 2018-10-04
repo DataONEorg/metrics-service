@@ -597,6 +597,7 @@ class MetricsElasticSearch(object):
         }
       }
     }
+    #This says:  >= mark_timestamp - 60 minutes
     gte = mark.isoformat() + "||-" + str(MetricsElasticSearch.SESSION_TTL_MINUTES) + "m"
     lt = mark.isoformat()
     search_body["query"]["bool"]["filter"]["range"][MetricsElasticSearch.F_DATELOGGED]["gte"] = gte
