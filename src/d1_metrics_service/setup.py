@@ -76,7 +76,8 @@ setup(
     'd1-metrics-service>=0.0.1',
     'dateparser>=0.7.0',
     'requests>=2.19.1',
-    'psycopg2>=2.7.5'
+    'psycopg2>=2.7.5',
+    'schedule>=0.5.0'
   ],
 
   # List additional groups of dependencies here (e.g. development

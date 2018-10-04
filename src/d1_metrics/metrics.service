@@ -1,0 +1,12 @@
+[Unit]
+Description=Python Metrics Service running the metricsservicemanager module
+After=multi-user.target
+
+[Service]
+User=root
+Group=www-data
+Type=simple
+ExecStart=/var/local/metrics-service/src/d1_metrics_service/.venv/bin/python3 /var/local/metrics-service/src/d1_metrics/d1_metrics/metricsservicemanager.py
+
+[Install]
+WantedBy=multi-user.target

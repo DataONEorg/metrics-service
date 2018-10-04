@@ -18,7 +18,7 @@ CONFIG_ELASTIC_SECTION = "elasticsearch"
 DEFAULT_ELASTIC_CONFIG = {
   "host":"localhost",
   "port":9200,
-  "index":"eventlog-0",
+  "index":"eventlog-1",
   }
 
 class MetricsElasticSearch(object):

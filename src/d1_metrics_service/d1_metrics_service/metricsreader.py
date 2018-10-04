@@ -5,15 +5,18 @@ import json
 import falcon
 from urllib.parse import urlparse
 from urllib.parse import unquote
+from urllib.parse import quote_plus
 import requests
 from d1_metrics.metricselasticsearch import MetricsElasticSearch
 from d1_metrics.metricsdatabase import MetricsDatabase
 from datetime import datetime
 
 
+
 DEFAULT_REPORT_CONFIGURATION={
     "solr_query_url": "https://cn.dataone.org/cn/v2/query/solr/?"
 }
+
 
 
 class MetricsReader:
@@ -22,12 +25,11 @@ class MetricsReader:
     and based on the filters queries the Elastic Search for
     results
     """
-    request = {}
-    response = {}
-
 
     def __init__(self):
         self._config = DEFAULT_REPORT_CONFIGURATION
+        self.request = {}
+        self.response = {}
 
     def on_get(self, req, resp):
         """
@@ -51,6 +53,8 @@ class MetricsReader:
         # status returned by the framework, but it is included here to
         # illustrate how this may be overridden as needed.
         resp.status = falcon.HTTP_200
+
+
 
     def on_post(self, req, resp):
         """
@@ -85,12 +89,21 @@ class MetricsReader:
         metrics = self.request['metrics']
         group_by = self.request['groupBy']
         results = {}
+        resultDetails = []
         if (len(filter_by) > 0):
             if filter_by[0]['filterType'] == "dataset" and filter_by[0]['interpretAs'] == "list":
-                results = self.getSummaryMetricsPerDataset(filter_by[0]["values"])
+                if(len(filter_by[0]['values']) == 1):
+                    results, resultDetails = self.getSummaryMetricsPerDataset(filter_by[0]["values"])
+                elif(len(filter_by[0]['values']) > 1):
+                    results, resultDetails = self.getSummaryMetricsForSearchResults(filter_by[0]["values"])
+                else:
+                    pass
         self.response["results"] = results
+        self.response["resultDetails"] = resultDetails
 
         return self.response
+
+
 
     def getSummaryMetricsPerDataset(self, PIDs):
         """
@@ -99,7 +112,7 @@ class MetricsReader:
         :param PIDs:
         :return: A dictionary containing lists of all the facets specified in the metrics_request
         """
-        metrics_elastic_search = MetricsElasticSearch(PIDs)
+        metrics_elastic_search = MetricsElasticSearch()
         metrics_elastic_search.connect()
         search_body = [
             {
@@ -110,6 +123,19 @@ class MetricsReader:
                     "pid.key": self.resolvePIDs(PIDs=PIDs)
                 }
 
+            },
+            {
+                "exists": {
+                    "field": "sessionId"
+                }
+            },
+            {
+                "terms": {
+                    "formatType": [
+                        "DATA",
+                        "METADATA"
+                    ]
+                }
             }
         ]
         aggregation_body = {
@@ -164,6 +190,7 @@ class MetricsReader:
         return (self.formatData(data, PIDs))
 
 
+
     def formatData(self, data, PIDs):
         """
         Formats the data into the specified Swagger format
@@ -180,27 +207,13 @@ class MetricsReader:
             "citations": []
 
         }
+        resultDetails = {}
+        resultDetails["citations"] = []
+        citationDict = {}
 
-        # Retreive the citations if any!
-        metrics_database = MetricsDatabase()
-        metrics_database.connect()
-        csr = metrics_database.getCursor()
-        sql = 'SELECT TARGET_ID FROM citations;'
-        target_ids = []
-        try:
-            csr.execute(sql)
-            rows = csr.fetchall()
-            for i in rows:
-                for j in PIDs:
-                    # print(i[0])
-                    # print(j)
-                    if i[0].lower() in j.lower():
-                        print("Yes")
-                        target_ids.append(i[0])
-        except Exception as e:
-            print('Database error!\n{0}', e)
-        finally:
-            pass
+        totalCitations,resultDetails["citations"] = self.gatherCitations(PIDs)
+        appendedCitations = False
+
 
 
         # Combine metrics into a single dictionary
@@ -216,53 +229,85 @@ class MetricsReader:
                 records[month][i["key"]["country"]]["views"] = i["doc_count"]
             pass
 
-        # adding citation metric
-        citationMonth = datetime.now().strftime('%Y-%m')
-        # records[citationMonth]["USA"]["citations"] = len(target_ids)
-        if citationMonth in records:
-            if "USA" in records[citationMonth]:
-                # Assigining the citation to each of the country for now.
-                # TODO: Discuss with the team about this.
-                records[citationMonth]["USA"]["citations"] = len(target_ids)
-        else:
-            records[citationMonth] = {
-                "USA": {
-                    "citations": len(target_ids)
-                }
-            }
 
-        # Parse the dictionary to form the expected output in the form of lists
-        for months in records:
-            for country in records[months]:
+        for citationObject in resultDetails["citations"]:
+            if(citationObject["link_publication_date"][:7] in citationDict):
+                citationDict[citationObject["link_publication_date"][:7]] = citationDict[citationObject["link_publication_date"][:7]] + 1
+            else:
+                citationDict[citationObject["link_publication_date"][:7]] = 1
+
+
+        if ("country" in self.response["metricsRequest"]["groupBy"]):
+            # Parse the dictionary to form the expected output in the form of lists
+            for months in records:
+                appendedCitations = False
+                for country in records[months]:
+                    results["months"].append(months)
+                    results["country"].append(country)
+                    if("downloads" in self.response["metricsRequest"]["metrics"]):
+                        if "downloads" in records[months][country]:
+                            results["downloads"].append(records[months][country]["downloads"])
+                        else:
+                            results["downloads"].append(0)
+
+                    # Views for the given time period.
+                    if ("views" in self.response["metricsRequest"]["metrics"]):
+                        if "views" in records[months][country]:
+                            results["views"].append(records[months][country]["views"])
+                        else:
+                            results["views"].append(0)
+
+                    if ("citations" in self.response["metricsRequest"]["metrics"]):
+                        if(not appendedCitations):
+                            citationCount = 0
+                            if(months in citationDict):
+                                results["citations"].append(citationDict[months])
+                            else:
+                                results["citations"].append(0)
+                            appendedCitations = True
+
+        else:
+            for months in records:
+                totalDownloads = 0
+                totalViews = 0
                 results["months"].append(months)
-                results["country"].append(country)
-                if "downloads" in records[months][country]:
-                    results["downloads"].append(records[months][country]["downloads"])
-                else:
+                for country in records[months]:
+                    if "downloads" in records[months][country]:
+                        totalDownloads = totalDownloads + records[months][country]["downloads"]
+                    if "views" in records[months][country]:
+                        totalViews = totalViews + records[months][country]["views"]
+
+
+                if("downloads" in self.response["metricsRequest"]["metrics"]):
+                    results["downloads"].append(totalDownloads)
+
+                if ("views" in self.response["metricsRequest"]["metrics"]):
+                    results["views"].append(totalViews)
+
+                if ("citations" in self.response["metricsRequest"]["metrics"]):
+                    if months in citationDict:
+                        results["citations"].append(citationDict[months])
+                    else:
+                        results["citations"].append(0)
+
+        for months, totals in citationDict.items():
+            if months not in results["months"]:
+                results["months"].append(months)
+                if("country" in self.response["metricsRequest"]["groupBy"]):
+                    results["country"].append("US")
+                if ("downloads" in self.response["metricsRequest"]["metrics"]):
                     results["downloads"].append(0)
 
-                # Views for the given time period.
-                # Note: Combining Views + Downloads
-                if "views" in records[months][country]:
-                    results["views"].append(records[months][country]["views"])
-                else:
+                if ("views" in self.response["metricsRequest"]["metrics"]):
                     results["views"].append(0)
 
-                if "citations" in records[months][country]:
-                    results["citations"].append(records[months][country]["citations"])
-                else:
-                    results["citations"].append(0)
-
-        #If no log entry found in the ES
-        if((len(results["months"])) == 0):
-            results["months"] = 0
-            results["country"] = 0
-            results["downloads"] = 0
-            results["views"] = 0
-            results["citations"] = 0
+                if ("citations" in self.response["metricsRequest"]["metrics"]):
+                    results["citations"].append(totals)
 
 
-        return results
+
+        return results, resultDetails
+
 
 
     def resolvePIDs(self, PIDs):
@@ -272,27 +317,117 @@ class MetricsReader:
         :return: A list of pids for previous versions and their data + metadata objects
         """
 
+        PIDstring = PIDs[0]
+
         # get the ids for all the previous versions and their data / metadata object till the current `pid` version
         # p.s. this might not be the latest version!
-        for i in PIDs:
-            queryString = 'q=id:"' + i + '"&fl=documents,obsoletes,resourceMap&wt=json'
-            response = requests.get(url=self._config["solr_query_url"], params=queryString).json()
-            if(response["response"]["numFound"] > 0):
-                # Checks if the pid has any data / metadata objects
-                if "documents" in response["response"]["docs"][0]:
-                    for j in response["response"]["docs"][0]["documents"]:
-                        if j not in PIDs:
-                            PIDs.append(j)
 
-                # Checks for the previous versions of the pid
-                if "obsoletes" in response["response"]["docs"][0]:
-                    if response["response"]["docs"][0]["obsoletes"] not in PIDs:
-                        PIDs.append(response["response"]["docs"][0]["obsoletes"])
+        # fl = "documents, obsoletes, resourceMap"
+        # q = "{!join from=resourceMap to=resourceMap}"
 
-                # Checks for the resource maps of the pid
-                if "resourceMap" in response["response"]["docs"][0]:
-                    for j in response["response"]["docs"][0]["resourceMap"]:
-                        if j not in PIDs:
-                            PIDs.append(j)
-        # return response.json()
+        queryString = 'q={!join from=resourceMap to=resourceMap}id:"' + PIDstring + '"&fl=id&wt=json'
+
+        resp = requests.get(url=self._config["solr_query_url"], params=queryString)
+
+        if (resp.status_code == 200):
+            PIDs = self.parseResponse(resp, PIDs)
+
+        callSolr = True
+        # print(PIDs)
+        # print(type(PIDs))
+        while (callSolr):
+
+            # Querying for all the PIDs that we got from the previous iteration
+            # Would be a single PID if this is the first iteration.
+            identifier = '(("' + '") OR ("'.join(PIDs) + '"))'
+
+            # Forming the query dictionary to be sent as a file to the Solr endpoint via the HTTP Post request.
+            queryDict = {}
+            queryDict["fq"] = (None, 'id:* AND resourceMap:' + identifier)
+            queryDict["fl"] = (None, 'id,documents,obsoletes,resourceMap')
+            queryDict["wt"] = (None, "json")
+
+            # Getting length of the array from previous iteration to control the loop
+            prevLength = len(PIDs)
+
+            resp = requests.post(url=self._config["solr_query_url"], files=queryDict)
+
+            if (resp.status_code == 200):
+                PIDs = self.parseResponse(resp, PIDs)
+
+            if (prevLength == len(PIDs)):
+                callSolr = False
+
+
         return PIDs
+
+
+
+    def parseResponse(self, resp, PIDs):
+        response = resp.json()
+
+
+        for doc in response["response"]["docs"]:
+            # Checks if the pid has any data / metadata objects
+            if "id" in doc:
+                if doc["id"] not in PIDs:
+                    PIDs.append(doc["id"])
+
+            if "documents" in doc:
+                for j in doc["documents"]:
+                    if j not in PIDs:
+                        PIDs.append(j)
+
+            # Checks for the previous versions of the pid
+            if "obsoletes" in doc:
+                if doc["obsoletes"] not in PIDs:
+                    PIDs.append(doc["obsoletes"])
+
+            # Checks for the resource maps of the pid
+            if "resourceMap" in doc:
+                for j in doc["resourceMap"]:
+                    if j not in PIDs:
+                        PIDs.append(j)
+
+        return PIDs
+
+
+    def gatherCitations(self, PIDs):
+        # Retreive the citations if any!
+        metrics_database = MetricsDatabase()
+        metrics_database.connect()
+        csr = metrics_database.getCursor()
+        sql = 'SELECT target_id,source_id,source_url,link_publication_date,origin,title,publisher,year_of_publishing FROM citations;'
+
+        citations = []
+        citationCount = 0
+        try:
+            csr.execute(sql)
+            rows = csr.fetchall()
+
+            for i in rows:
+                citationObject = {}
+                for j in PIDs:
+                    if i[0].lower() in j.lower():
+                        citationCount = citationCount + 1
+                        citationObject["target_id"] = i[0]
+                        citationObject["source_id"] = i[1]
+                        citationObject["source_url"] = i[2]
+                        citationObject["link_publication_date"] = i[3]
+                        citationObject["origin"] = i[4]
+                        citationObject["title"] = i[5]
+                        citationObject["publisher"] = i[6]
+                        citationObject["year_of_publishing"] = i[7]
+                        citations.append(citationObject)
+                        # We don't want to add duplicate citations for all the objects of the dataset
+                        break
+        except Exception as e:
+            print('Database error!\n{0}', e)
+        finally:
+            pass
+        return (citationCount, citations)
+
+
+
+if __name__ == "__main__":
+    mr = MetricsReader()

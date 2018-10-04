@@ -38,6 +38,7 @@ create table citations (
     metadata  JSON,               -- the json metadata object
     target_id TEXT,               -- target(dataset that was cited) identifier
     source_id TEXT,               -- source identifier
+    source_url TEXT,              -- source url
     link_publication_date TEXT,   -- the date when this relation was first recorded by CROSSREF.
     origin TEXT,                  -- authors of the source dataset
     title TEXT,                   -- title of the dataset
