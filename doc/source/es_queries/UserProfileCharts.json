@@ -1,5 +1,5 @@
 {
-	"metrics": [
+  "metrics": [
       "Citations",
       "Unique_Dataset_Requests",
       "Total_Dataset_Requests",
@@ -8,14 +8,22 @@
     ],
     "filterBy": [
       {
-        "filterType": "dataset",
+        "filterType": "uid",
         "values": [
-          "Dataset002"
+          "User01"
         ],
         "interpretAs": "list"
+      },
+      {
+        "filterType": "month",
+        "values": [
+          "2017-01",
+          "2018-04"
+        ],
+        "interpretAs": "range"
       }
     ],
     "groupBy": [
-      "dataset"
+      "uid", "month", "year"
     ]
 }

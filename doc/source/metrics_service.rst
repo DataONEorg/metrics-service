@@ -25,6 +25,8 @@ Class Diagram
 
     !include ./plantuml-styles.txt
 
+.. uml::
+
     skinparam linetype ortho
     left to right direction
 
@@ -117,8 +119,4 @@ Class Diagram
     MetricsElasticSearch -down- MetricsDatabase: updates >
     MetricsReporter -down- MetricsDatabase: reads >
 
-
-  @enduml
-
-.. image:: ./images/metrics-service-class-diagram.png
 
