@@ -60,8 +60,16 @@ Component Diagram
     apache -->  [cn.filebeat] : ""
     TCP_5705 .. [Log Stash] : ""
     [cn.filebeat] ..> TCP_5705 : ""
-    [Log Stash] --> [Log Stash] : "Filtering and\nSession Calculation[2]"
+    [Log Stash] --> [Log Stash] : "Filtering and\nSession Calculation [2]"
     [Log Stash] --> [Elastic Search] : ""
     comp2 -right-> [Elastic Search] : "Query for the log records"
 
+General flow of event information in the DataONE system. Events occur at Member
+and Coordinating Nodes and are aggregated by the Log Aggregation process that 
+runs within the ``d1-processing`` application. Events are written to both a 
+solr index and to JSON format log files. The log files are monitored by 
+``filebeat`` and forwarded to a ``logstash`` service. The ``logstash`` service 
+applies geocoding, robots identification, and user agent matching before adding 
+to an ``elasticseach`` instance. [1] The current implementation uses a python 
+script to retrieve events from the solr index and write to JSON log files. 
 
