@@ -42,3 +42,11 @@ Unprocessed events
 .. literalinclude:: includes/es_queries/unprocessed_events.json
    :language: javascript
 
+
+
+.. Note that kinbana can load a query from a URL, providing that Access-Control-Allow-Origin is set
+   appropriately on the server providing the content. This is not done by readthedocs.io but could
+   if we run through a proxy somewhere to add the header. The URL construct is:
+
+     ?load_from=https://some.server/path/to/example.json
+
