@@ -1,0 +1,18 @@
+GET eventlog-1/_search
+{
+ "query": {
+   "bool": {
+     "must": [
+       {
+         "term": {"event.key": "read"}
+       }
+     ],
+     "must_not": [
+       {
+         "exists":{"field":"sessionId"}
+       }
+     ]
+   }
+ },
+ "size":0
+}

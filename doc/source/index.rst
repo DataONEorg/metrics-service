@@ -14,6 +14,7 @@ DataONE Metrics Service
    metrics_service
    elastic_queries
    event_examples
+   apache_log
 
 
 Indices and tables

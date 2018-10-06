@@ -14,21 +14,22 @@ Metrics Service
 Landing Page Query Request
 ..........................
 
-.. literalinclude:: es_queries/LandingPageQueryRequest.json
+.. literalinclude:: includes/es_queries/LandingPageQueryRequest.json
    :language: json
+
 
 
 User Profile Charts
 ...................
 
-.. literalinclude:: es_queries/UserProfileCharts.json
+.. literalinclude:: includes/es_queries/UserProfileCharts.json
    :language: json
 
 
 User Profile Summary
 ....................
 
-.. literalinclude:: es_queries/UserProfileSummary.json
+.. literalinclude:: includes/es_queries/UserProfileSummary.json
    :language: json
 
 
@@ -38,24 +39,6 @@ Event Processing
 Unprocessed events
 ..................
 
-Apply against ``GET eventlog-1/_search``
+.. literalinclude:: includes/es_queries/unprocessed_events.json
+   :language: javascript
 
-.. code-block:: json
-
-   {
-     "query": {
-       "bool": {
-         "must": [
-           {
-             "term": {"event.key": "read"}
-           }
-         ],
-         "must_not": [
-           {
-             "exists":{"field":"sessionId"}
-           }
-         ]
-       }
-     },
-     "size":0
-   }
