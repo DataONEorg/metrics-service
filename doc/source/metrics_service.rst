@@ -119,9 +119,9 @@ Class Diagram
     }
 
     ' Define the interactions
-    d1_metrics_service -down- MetricsReader: requests > 
-    MetricsReader -down- MetricsElasticSearch: reads >
-    MetricsReader -down- MetricsDatabase: reads >
-    MetricsReporter -up- MetricsElasticSearch: reads >
+    d1_metrics_service -left- MetricsReader: requests >
+    MetricsReader -- MetricsElasticSearch: reads >
+    MetricsReader -- MetricsDatabase: reads >
+    MetricsReporter -right- MetricsElasticSearch: reads >
 
 
