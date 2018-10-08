@@ -24,4 +24,6 @@ make clean livehtml
 Then open a browser at http://localhost:8000/
 
 
-The document
+The document will update in your browser as edits are saved. In some 
+cases edits may not appear as expected, in that case just run 
+the ``make clean livehtml`` command and refresh the browser.

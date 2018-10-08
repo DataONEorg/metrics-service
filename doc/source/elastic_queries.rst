@@ -42,6 +42,7 @@ Unprocessed events
 .. literalinclude:: includes/es_queries/unprocessed_events.json
    :language: javascript
 
+`View in kibana <https://logproc-stage-ucsb-1.test.dataone.org/app/kibana#/dev_tools/console?load_from=https://purl.dataone.org/metrics-docs/es_queries/unprocessed_events.json>`_
 
 
 .. Note that kinbana can load a query from a URL, providing that Access-Control-Allow-Origin is set
