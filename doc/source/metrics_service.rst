@@ -30,6 +30,8 @@ Class Diagram
     ' For class diagram help see http://plantuml.com/class-diagram
     ' Define the classes
 
+.. uml::
+
     package d1_metrics {
         class MetricsDatabase {
             + loadConfig()
@@ -123,6 +125,3 @@ Class Diagram
     MetricsReporter -up- MetricsElasticSearch: reads >
 
 
-    @enduml
-
-  .. image:: ../images/metrics-service-class-diagram.png
