@@ -7,25 +7,22 @@ Metrics Service Class Diagram
 
 - The JSON `MetricsRequest` object from the HTTP requests is passed on to the `MetricsReader` class for further processing.
 
-- The `MetricsReader` class parses the `MetricsRequest` object and based on the filtering properties calls the appropriate method of the `MetricsDatabase` class from the `d1_metrics` package.
+- The `MetricsReader` class parses the `MetricsRequest` object and based on the filtering properties calls the appropriate method of the `MetricsElasticSearch` and the `MetricsDatabase` class from the `d1_metrics` package.
 
-- The `MetricsDatabase` class has methods that establishes connection and returns a cursor that could perform `CRUD` operations on the database. This class also has multiple methods that helps interact with the PostgreSQL database. 
+- The `MetricsElasticSearch` class has various methods to aggregate the metrics based on the filters specified in the `MetricsReader` class. The `MetricsReader` class forms a `MetricsResponse` object which is sent back to the client as HTTP Response.
 
-- The `MetricsDatabase` class retrieves the queries results from the Database and returns the results to the `MetricsReader` class. The `MetricsReader` class forms a `MetricsResponse` object which is sent back to the client as HTTP Response.
+- The `MetricsDatabase` class has methods that establishes connection and returns a cursor that could perform `CRUD` operations on the Citations database. This class is reponsible for gathering Citations for the DataONE objects from the Crossref Citations API and updating the metadata on timely basis.
 
 - The `MetricsReporter` class queries `solr` to get the metadata for the generation of reports on a scheduled basis. These reports are send to the hub on month-to-month basis.
 
-- The `MetricsElasticSearch` class has methods to retrieve information from the Elastic Search.
 
 
 Class Diagram
 -----------------
 ..
-  @startuml ./images/metrics-service-class-diagram.png
+  @startuml ../images/metrics-service-class-diagram.png
 
-    !include ./plantuml-styles.txt
-
-.. uml::
+    !include ../plantuml-styles.txt
 
     skinparam linetype ortho
     left to right direction
@@ -38,30 +35,28 @@ Class Diagram
             + loadConfig()
             + connect()
             + getCursor()
-            - _iterRow()
+            + getDOIs()
+            + getCitations()
+            + updateCitationMetadata()
             + getSingleValue()
             + initializeDatabase()
-            + summaryReport()
-            + setMetadataValue()
-            + getMetadataValue()
-            + deleteMetadataValue()
-            + getMetadata()
-            + getSummaryMetricsPerDataset()
-            + getSummaryMetricsPerUser()
-            + getMetricsPerUser()
-            + getSummaryMetrics()
-            + getMetrics()
-            + upsertMetrics()
+            - _iterRow()
         }
         
         note bottom of MetricsDatabase
-            Interacts with the PostgreSQL database
+            Interacts with the PostgreSQL database to manage DataONE Citations
         end note
         
         class MetricsReporter {
-            + querySolr()
-            + generateReports()
-            + sendReports()
+            + report_handler()
+            + get_report_header()
+            + get_unique_pids()
+            + generate_instances()
+            + get_report_datasets()
+            + resolve_MN()
+            + send_reports()
+            + query_solr()
+            + scheduler()
         }
         
         note bottom of MetricsReporter
@@ -78,6 +73,9 @@ Class Diagram
             + connect()
             + getInfo()
             + setSessionId()
+            + get_aggregations()
+            + iterate_composite_aggregations()
+            + computeSessions()
             - _getQueryTemplate()
             - _getQueryResults()
         }
@@ -92,14 +90,19 @@ Class Diagram
         class MetricsReader {
             + metricsRequest
             + metricsResponse
-            + processRequest()
             + on_get()
             + on_post()
+            + processRequest()
+            + getSummaryMetricsPerDataset()
+            + gatherCitations()
+            + parseResponse()
+            + formatData()
+            + resolvePIDs()
         }
 
         note bottom of MetricsReader
             Responds to REST requests with
-            JSON results from the database
+            JSON results from the ES index and the database
         end note
 
         class d1_metrics_service {
@@ -115,8 +118,11 @@ Class Diagram
 
     ' Define the interactions
     d1_metrics_service -down- MetricsReader: requests > 
-    MetricsReader -up- MetricsDatabase: reads >
-    MetricsElasticSearch -down- MetricsDatabase: updates >
-    MetricsReporter -down- MetricsDatabase: reads >
+    MetricsReader -down- MetricsElasticSearch: reads >
+    MetricsReader -down- MetricsDatabase: reads >
+    MetricsReporter -up- MetricsElasticSearch: reads >
 
 
+    @enduml
+
+  .. image:: ../images/metrics-service-class-diagram.png
