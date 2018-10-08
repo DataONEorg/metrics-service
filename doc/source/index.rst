@@ -10,6 +10,7 @@ DataONE Metrics Service
    :maxdepth: 2
    :caption: Contents:
 
+   implementation
    architecture
    metrics_service
    elastic_queries
