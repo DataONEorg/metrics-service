@@ -19,7 +19,7 @@ from collections import Counter
 
 DEFAULT_REPORT_CONFIGURATION={
     "report_url" : "https://api.datacite.org/reports",
-    "auth_token" : "eyJhbGciOiJSUzI1NiJ9.eyJ1aWQiOiJkYXRhb25lIiwibmFtZSI6Ikpvc2lhaCBDYXJiZXJyeSIsInByb3ZpZGVyX2lkIjoiZGF0YWNpdGUiLCJjbGllbnRfaWQiOiJkYXRhb25lIiwicm9sZV9pZCI6InN0YWZmX2FkbWluIiwiaWF0IjoxNTIwNDczNDM3LCJleHAiOjE1MzYwMjU0Mzd9.dSBx5w0lGyKDcmVv4FxH6KgASPLmwRbwpiB12p3jPCkwJlG4NbYdqRtvFd5c86LtCmXwochwmRC97dU7YQE6TrkX3zpXI0hAJfALDfVlRkMvYaka7SbAMt3DKo8pcawzV6RXvyf8g_otULNyZ5Ayfg1CpxTkF9sIWacb_JNzb9mhndYe2eg821hTtho1yE0gaNd32of1fQdX2E2nCpKV4ly4-nuVZCb1RFj0i2f9JV51qVEWv3QF0s5fcaKWlZx26KdsNvuw_LBNlZs3IoLEvFjwSbnvS1qao1g49M5--Y1MHENN5QLVd-q8xTkFO9VTJWxp1czMF0kYlKrnpSvpPw",
+    "auth_token" : "",
     "report_name" : "Dataset Master Report",
     "release" : "rd1",
     "created_by" : "DataONE",
@@ -41,16 +41,14 @@ class MetricsReporter(object):
         :param end_date:
         :return: None
         """
-        print("handling report for", start_date, end_date)
         json_object = {}
         json_object["id"] = "DSR-D1-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
         json_object["report-header"] = self.get_report_header(start_date, end_date)
         json_object["report-datasets"] = self.get_report_datasets(start_date, end_date)
         with open('./reports/' + ("DSR-D1-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d'))+'.json', 'w') as outfile:
-            print("Writing to file")
             json.dump(json_object, outfile, indent=2,ensure_ascii=False)
-        self.send_reports(start_date, end_date)
-        return
+        response = self.send_reports(start_date, end_date)
+        return response
 
 
     def get_report_header(self, start_date, end_date):
@@ -114,8 +112,6 @@ class MetricsReporter(object):
         for i in pid_list:
             if i not in unique_pids:
                 unique_pids.append(i)
-
-        print("Unique pids for ", start_date, end_date, len(unique_pids))
 
         return (unique_pids)
 
@@ -307,7 +303,9 @@ class MetricsReporter(object):
         count = 0
         for pid in unique_pids:
             count = count + 1
-            print(count, " of " , len(unique_pids))
+            if((count % 100 == 0) or (count == 1) or (count == len(unique_pids))) :
+                print(count, " of " , len(unique_pids))
+
 
             dataset = {}
             solr_response = self.query_solr(pid)
@@ -321,7 +319,7 @@ class MetricsReporter(object):
 
                 if ("authoritativeMN" in (i for i in solr_response["response"]["docs"][0])):
                     dataset["publisher-id"] = []
-                    dataset["publisher-id"].append({"type":"https://cn.dataone.org/cn/v2/node/", "value" :solr_response["response"]["docs"][0]["authoritativeMN"]})
+                    dataset["publisher-id"].append({"type":"grid", "value" :solr_response["response"]["docs"][0]["authoritativeMN"]})
 
                 dataset["platform"] = "DataONE"
 
@@ -341,7 +339,8 @@ class MetricsReporter(object):
                 if "doi" in pid:
                     dataset["dataset-id"] = [{"type": "doi", "value": pid}]
                 else:
-                    dataset["dataset-id"] = [{"type": "other-id", "value": pid}]
+                    continue
+                    # dataset["dataset-id"] = [{"type": "other-id", "value": pid}]
 
                 dataset["yop"] = dataset["dataset-dates"][0]["value"][:4]
 
@@ -389,8 +388,9 @@ class MetricsReporter(object):
                     instance.append(total_dataset_requests)
                     instance.append(unique_dataset_requests)
 
-                    performance["instance"] = instance
-                    dataset["performance"].append(performance)
+                performance["instance"] = instance
+
+                dataset["performance"].append(performance)
 
 
 
@@ -480,15 +480,9 @@ class MetricsReporter(object):
             {'Authorization': "Bearer " +  self._config["auth_token"], 'Content-Type': 'application/json', 'Accept': 'application/json'})
         with open("./reports/DSR-D1-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')+'.json', 'r') as content_file:
             content = content_file.read()
-        r = s.post(self._config["report_url"], data=content.encode("utf-8"))
-        print('Sending report to the hub')
+        response = s.post(self._config["report_url"], data=content.encode("utf-8"))
 
-        print('')
-        print(r.status_code, r.reason)
-        print('')
-        print("Headers: " + str(r.headers))
-        print('')
-        print("Content: " + str(r.content))
+        return response
 
 
     def query_solr(self, PID):
@@ -510,7 +504,7 @@ class MetricsReporter(object):
         Probably would be called only once in its lifetime
         :return: None
         """
-        date = datetime(2012, 7, 1)
+        date = datetime(2012, 7, 5)
         stopDate = datetime(2012, 12, 31)
 
         count = 0
@@ -525,12 +519,34 @@ class MetricsReporter(object):
             print("Job ", count, " : ", prevDate.strftime('%m/%d/%Y'), " to ", date.strftime('%m/%d/%Y'))
 
             # Uncomment me to send reports to the HUB!
-            self.report_handler(prevDate.strftime('%m/%d/%Y'), date.strftime('%m/%d/%Y'))
+            response = self.report_handler(prevDate.strftime('%m/%d/%Y'), date.strftime('%m/%d/%Y'))
+
+
+            with open('./reports/reports.log', 'a') as logfile:
+                logentry = "Job "+ str(count) + " : " + prevDate.strftime('%m/%d/%Y') + " to " + date.strftime('%m/%d/%Y') + " === " + str(response.status_code)
+                logfile.write(logentry)
+                logfile.write("\n")
 
             print("Job ", count, " : ", prevDate, " to ", date)
 
-            if(count == 1):
-                break
+            if response.status_code != 201:
+                with open('./reports/reports_errors.log', 'a') as errorfile:
+                    logentry = "Job " + str(count) + " : " + prevDate.strftime('%m/%d/%Y') + " to " + date.strftime(
+                        '%m/%d/%Y') + " === " + str(response.status_code)
+                    errorfile.write("\n")
+                    errorfile.write(datetime.now().strftime("%I:%M%p on %B %d, %Y"))
+                    errorfile.write("\n")
+                    errorfile.write(logentry)
+                    errorfile.write("\n")
+                    errorfile.write(str(response.status_code) + " " + response.reason)
+                    errorfile.write("\n")
+                    errorfile.write("Headers: ")
+                    errorfile.write(str(response.headers))
+                    errorfile.write("\n")
+                    errorfile.write("Content: ")
+                    errorfile.write(str(response.content))
+                    errorfile.write("\n")
+
 
 
 
