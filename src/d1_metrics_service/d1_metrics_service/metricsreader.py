@@ -9,7 +9,11 @@ from urllib.parse import quote_plus
 import requests
 from d1_metrics.metricselasticsearch import MetricsElasticSearch
 from d1_metrics.metricsdatabase import MetricsDatabase
+from multiprocessing import Process
+from multiprocessing import Pool
+import multiprocessing
 from datetime import datetime
+from functools import partial
 
 
 
@@ -38,7 +42,6 @@ class MetricsReader:
         :param resp: HTTP Response object
         :return: HTTP Response object
         """
-
         #taking query parametrs from the HTTP GET request and forming metricsRequest Object
         metrics_request = {}
         query_param = urlparse(unquote(req.url))
@@ -94,10 +97,15 @@ class MetricsReader:
             if filter_by[0]['filterType'] == "dataset" and filter_by[0]['interpretAs'] == "list":
                 if(len(filter_by[0]['values']) == 1):
                     results, resultDetails = self.getSummaryMetricsPerDataset(filter_by[0]["values"])
-                elif(len(filter_by[0]['values']) > 1):
-                    results, resultDetails = self.getSummaryMetricsForSearchResults(filter_by[0]["values"])
-                else:
-                    pass
+
+            if (filter_by[0]['filterType'] == "catalog" or filter_by[0]['filterType'] == "package")  and filter_by[0]['interpretAs'] == "list":
+                if(filter_by[0]['filterType'] == "catalog" and len(filter_by[0]['values']) == 1 ):
+                    results, resultDetails = self.getSummaryMetricsPerDataset(filter_by[0]["values"])
+                if(filter_by[0]['filterType'] == "package" and len(filter_by[0]['values']) == 1 ):
+                    results, resultDetails = self.getSummaryMetricsPerCatalog(filter_by[0]["values"], filter_by[0]['filterType'])
+                if(len(filter_by[0]['values']) > 1):
+                    results, resultDetails = self.getSummaryMetricsPerCatalog(filter_by[0]["values"], filter_by[0]['filterType'])
+
         self.response["results"] = results
         self.response["resultDetails"] = resultDetails
 
@@ -114,15 +122,57 @@ class MetricsReader:
         """
         metrics_elastic_search = MetricsElasticSearch()
         metrics_elastic_search.connect()
+        PIDs = self.resolvePIDs(PIDs)
+        obsoletesDictionary = {}
+        # print(PIDs)
+
+        # Getting Obsoletes dictionary
+        manager = multiprocessing.Manager()
+        masterProcess = []
+        obsoletes_dict = manager.dict()
+
+
+        pool = multiprocessing.Pool()
+        partialResolveDataPackagePID = partial(self.resolveDataPackagePID, obsoletes_dict)
+
+        pool.map(partialResolveDataPackagePID, PIDs)
+        pool.close()
+        pool.join()
+
+        # Resolving all the PIDs from
+        # for i in PIDs:
+        #     subProcess = Process(target=self.resolveDataPackagePID, args=(i, obsoletes_dict))
+        #     masterProcess.append(subProcess)
+        #     subProcess.start()
+
+        aggregatedPIDs = {}
+        for i in PIDs:
+            aggregatedPIDs[i] = {
+                "filters": {
+                    "filters": {
+                        "pid.key": {
+                            "term": {
+                                "pid.key": i
+                            }
+                        }
+                    }
+                }
+            }
+
         search_body = [
             {
                 "term": {"event.key": "read"}
             },
             {
                 "terms": {
-                    "pid.key": self.resolvePIDs(PIDs=PIDs)
+                    "pid.key": PIDs
                 }
 
+            },
+            {
+                "exists": {
+                    "field": "geoip.country_code2.keyword"
+                }
             },
             {
                 "exists": {
@@ -158,11 +208,26 @@ class MetricsReader:
                             }
                         }
                     ]
-                }
+                },
+                "aggs" : aggregatedPIDs
+            },
+            "package_pid_list": {
+                "composite": {
+                    "sources": [
+                      {
+                        "format": {
+                          "terms": {
+                            "field": "formatType"
+                          }
+                        }
+                      }
+                    ]
+                },
+                "aggs": aggregatedPIDs
             }
         }
         pid = self.response["metricsRequest"]["filterBy"][0]["values"]
-        self.response["metricsRequest"]["filterBy"][0]["values"] = self.resolvePIDs(PIDs=pid)
+        self.response["metricsRequest"]["filterBy"][0]["values"] = PIDs
         self.request["filterBy"][0]["values"] = self.response["metricsRequest"]["filterBy"][0]["values"]
 
         start_date = "01/01/2000"
@@ -187,11 +252,16 @@ class MetricsReader:
                                                                      start_date=datetime.strptime(start_date,'%m/%d/%Y'),
                                                                      end_date=datetime.strptime(end_date,'%m/%d/%Y'))
 
-        return (self.formatData(data, PIDs))
+        for subProcess in masterProcess:
+            subProcess.join()
+
+        obsoletesDictionary = {k: str(v) for k, v in obsoletes_dict.items()}
+
+        return (self.formatDataPerDataset(data, PIDs, obsoletesDictionary))
 
 
 
-    def formatData(self, data, PIDs):
+    def formatDataPerDataset(self, data, PIDs, obsoletesDictionary):
         """
         Formats the data into the specified Swagger format
         :param data: Dictionary retrieved from the ES
@@ -204,7 +274,8 @@ class MetricsReader:
             "country": [],
             "downloads": [],
             "views": [],
-            "citations": []
+            "citations": [],
+            "datasets": []
 
         }
         resultDetails = {}
@@ -212,9 +283,8 @@ class MetricsReader:
         citationDict = {}
 
         totalCitations,resultDetails["citations"] = self.gatherCitations(PIDs)
+        resultDetails["metrics_package_counts"] = self.parsePackageCounts(data, PIDs, obsoletesDictionary)
         appendedCitations = False
-
-
 
         # Combine metrics into a single dictionary
         for i in data["aggregations"]["pid_list"]["buckets"]:
@@ -304,8 +374,6 @@ class MetricsReader:
                 if ("citations" in self.response["metricsRequest"]["metrics"]):
                     results["citations"].append(totals)
 
-
-
         return results, resultDetails
 
 
@@ -358,14 +426,12 @@ class MetricsReader:
             if (prevLength == len(PIDs)):
                 callSolr = False
 
-
         return PIDs
 
 
 
     def parseResponse(self, resp, PIDs):
         response = resp.json()
-
 
         for doc in response["response"]["docs"]:
             # Checks if the pid has any data / metadata objects
@@ -392,6 +458,7 @@ class MetricsReader:
         return PIDs
 
 
+
     def gatherCitations(self, PIDs):
         # Retreive the citations if any!
         metrics_database = MetricsDatabase()
@@ -408,7 +475,11 @@ class MetricsReader:
             for i in rows:
                 citationObject = {}
                 for j in PIDs:
+                    # Special use case for Dryad datasets.
+                    if ('?' in j.lower()):
+                        j = j.split("?")[0]
                     if i[0].lower() in j.lower():
+
                         citationCount = citationCount + 1
                         citationObject["target_id"] = i[0]
                         citationObject["source_id"] = i[1]
@@ -426,6 +497,270 @@ class MetricsReader:
         finally:
             pass
         return (citationCount, citations)
+
+
+
+    def getSummaryMetricsPerCatalog(self, requestPIDArray, type):
+        """
+        Queries the Elastic Search and retrieves the summary metrics for a given DataCatalog pid Array.
+        This information is used to populate the DataCatalog and Search pages.
+        :param requestPIDArray: Array of PIDs of datasets on DataCatalog page or Search page
+        :return:
+        """
+
+        manager = multiprocessing.Manager()
+        catalogPIDs = {}
+        combinedPIDs = []
+        masterProcess = []
+        for i in requestPIDArray:
+            if i not in catalogPIDs:
+                catalogPIDs[i] = []
+                catalogPIDs[i].append(i)
+
+        self.catalogPIDs = catalogPIDs
+
+        return_dict = manager.dict()
+
+
+        pool = multiprocessing.Pool()
+        partialResolveCatalogPID = partial(self.resolveCatalogPID, return_dict, type)
+
+        pool.map(partialResolveCatalogPID, catalogPIDs)
+        pool.close()
+        pool.join()
+
+
+        for subProcess in masterProcess:
+            subProcess.join()
+
+        # catalogPIDs = return_dict
+        for i in catalogPIDs:
+            catalogPIDs[i] = return_dict[i]
+        # print(return_dict)
+
+        for i in catalogPIDs:
+            combinedPIDs.extend(catalogPIDs[i])
+
+        aggregatedPIDs = {}
+        for i in catalogPIDs:
+            aggregatedPIDs[i] = {
+                "filters": {
+                    "filters": {
+                        "pid.key": {
+                            "terms": {
+                                "pid.key": catalogPIDs[i]
+                            }
+                        }
+                    }
+                }
+            }
+
+        # Setting the query for the data catalog page
+        metrics_elastic_search = MetricsElasticSearch()
+        metrics_elastic_search.connect()
+        search_body = [
+            {
+                "term": {"event.key": "read"}
+            },
+            {
+                "terms": {
+                    "pid.key": combinedPIDs
+                }
+
+            },
+            {
+                "exists": {
+                    "field": "sessionId"
+                }
+            },
+            {
+                "exists": {
+                    "field": "geoip.country_code2.keyword"
+                }
+            },
+            {
+                "terms": {
+                    "formatType": [
+                        "DATA",
+                        "METADATA"
+                    ]
+                }
+            }
+        ]
+        aggregation_body = {
+            "pid_list": {
+              "composite": {
+                "size": 100,
+                "sources": [
+                  {
+                    "format": {
+                      "terms": {
+                        "field": "formatType"
+                      }
+                    }
+                  }
+                ]
+              },
+              "aggs": aggregatedPIDs
+            }
+        }
+
+        start_date = "01/01/2000"
+        end_date = datetime.today().strftime('%m/%d/%Y')
+
+        data = metrics_elastic_search.iterate_composite_aggregations(search_query=search_body,
+                                                                     aggregation_query=aggregation_body,
+                                                                     start_date=datetime.strptime(start_date,
+                                                                                                  '%m/%d/%Y'),
+                                                                     end_date=datetime.strptime(end_date, '%m/%d/%Y'))
+
+        # return {}, {}
+        # return data, {}
+        return (self.formatDataPerCatalog(data, catalogPIDs))
+
+
+
+    def formatDataPerCatalog(self, data, catalogPIDs):
+        dataCounts = {}
+        metadataCounts = {}
+        downloads = []
+        views = []
+        results = {
+            "downloads": [],
+            "views": [],
+            "citations": [],
+            "datasets": [],
+            "country": [],
+            "months": []
+            # "tempDict" : []
+        }
+
+        for i in catalogPIDs:
+            count, cits = self.gatherCitations(catalogPIDs[i])
+            results["citations"].append(count)
+
+        for i in data["aggregations"]["pid_list"]["buckets"]:
+            if i["key"]["format"] == "DATA":
+                dataCounts = i
+            if i["key"]["format"] == "METADATA":
+                metadataCounts = i
+
+        for i in catalogPIDs:
+            if i in dataCounts:
+                results["downloads"].append(dataCounts[i]["buckets"]["pid.key"]["doc_count"])
+            else:
+                results["downloads"].append(0)
+
+            if i in metadataCounts:
+                results["views"].append(metadataCounts[i]["buckets"]["pid.key"]["doc_count"])
+            else:
+                results["views"].append(0)
+
+            results["datasets"].append(i)
+
+        return  results, {}
+
+
+
+    def resolveCatalogPID(self, return_dict, type, PID):
+        PIDs = []
+        PIDs.append(PID)
+        if(type == "catalog"):
+            return_dict[PID] = self.resolvePIDs(PIDs)
+        if(type == "package"):
+            return_dict[PID] = self.resolvePackagePIDs(PIDs)
+
+
+
+    def resolvePackagePIDs(self, PIDs):
+        """
+        Checks for the versions and obsolecence chain of the given PID
+        :param PID:
+        :return: A list of pids for previous versions and their data + metadata objects
+        """
+        callSolr = True
+
+        while (callSolr):
+
+            # Querying for all the PIDs that we got from the previous iteration
+            # Would be a single PID if this is the first iteration.
+            identifier = '(("' + '") OR ("'.join(PIDs) + '"))'
+
+            # Forming the query dictionary to be sent as a file to the Solr endpoint via the HTTP Post request.
+            queryDict = {}
+            queryDict["fq"] = (None, 'id:*' + identifier)
+            queryDict["fl"] = (None, 'obsoletes')
+            queryDict["wt"] = (None, "json")
+
+            # Getting length of the array from previous iteration to control the loop
+            prevLength = len(PIDs)
+
+            resp = requests.post(url=self._config["solr_query_url"], files=queryDict)
+
+            if (resp.status_code == 200):
+                PIDs = self.parseResponse(resp, PIDs)
+
+            if (prevLength == len(PIDs)):
+                callSolr = False
+
+        return PIDs
+
+
+
+    def resolveDataPackagePID(self, obsoletes_dict, PID):
+
+        # Forming the query dictionary to be sent as a file to the Solr endpoint via the HTTP Post request.
+        queryString = 'q=id:"' + PID + '"&fl=obsoletes&wt=json'
+
+        resp = requests.get(url=self._config["solr_query_url"], params=queryString)
+
+        if (resp.status_code == 200):
+            PIDs = self.parseResponse(resp, [])
+            if (len(PIDs) != 0):
+                obsoletes_dict[PID] = PIDs[0]
+            else:
+                pass
+
+
+
+    def parsePackageCounts(self, data, PIDs, obsoletesDictionary):
+        resultDict = {}
+        pid_list = []
+        downloads = {}
+        views = {}
+
+
+        for i in data["aggregations"]["package_pid_list"]["buckets"]:
+            if(i["key"]["format"] == "DATA"):
+                downloads = i
+            if(i["key"]["format"] == "METADATA"):
+                views = i
+
+        for i in obsoletesDictionary:
+            if obsoletesDictionary[i] in PIDs:
+                PIDs.remove(obsoletesDictionary[i])
+
+        for i in PIDs:
+            target = i
+            if target in views:
+                viewCount = views[target]["buckets"]["pid.key"]["doc_count"]
+            else:
+                viewCount = 0
+            if target in downloads:
+                downloadCount = downloads[target]["buckets"]["pid.key"]["doc_count"]
+            else:
+                downloadCount = 0
+            while(target in obsoletesDictionary):
+                target = obsoletesDictionary[target]
+                if target in views:
+                    viewCount += views[target]["buckets"]["pid.key"]["doc_count"]
+                if target in downloads:
+                    downloadCount = downloads[target]["buckets"]["pid.key"]["doc_count"]
+            resultDict[i] = {}
+            resultDict[i]["viewCount"] = viewCount
+            resultDict[i]["downloadCount"] = downloadCount
+
+        return resultDict
 
 
 
