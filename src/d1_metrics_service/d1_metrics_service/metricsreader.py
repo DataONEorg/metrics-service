@@ -139,12 +139,6 @@ class MetricsReader:
         pool.close()
         pool.join()
 
-        # Resolving all the PIDs from
-        # for i in PIDs:
-        #     subProcess = Process(target=self.resolveDataPackagePID, args=(i, obsoletes_dict))
-        #     masterProcess.append(subProcess)
-        #     subProcess.start()
-
         aggregatedPIDs = {}
         for i in PIDs:
             aggregatedPIDs[i] = {
@@ -251,9 +245,6 @@ class MetricsReader:
                                                                      aggregation_query=aggregation_body,
                                                                      start_date=datetime.strptime(start_date,'%m/%d/%Y'),
                                                                      end_date=datetime.strptime(end_date,'%m/%d/%Y'))
-
-        for subProcess in masterProcess:
-            subProcess.join()
 
         obsoletesDictionary = {k: str(v) for k, v in obsoletes_dict.items()}
 
@@ -464,7 +455,7 @@ class MetricsReader:
         metrics_database = MetricsDatabase()
         metrics_database.connect()
         csr = metrics_database.getCursor()
-        sql = 'SELECT target_id,source_id,source_url,link_publication_date,origin,title,publisher,year_of_publishing FROM citations;'
+        sql = 'SELECT target_id,source_id,source_url,link_publication_date,origin,title,publisher,journal,volume,page,year_of_publishing FROM citations;'
 
         citations = []
         citationCount = 0
@@ -488,7 +479,10 @@ class MetricsReader:
                         citationObject["origin"] = i[4]
                         citationObject["title"] = i[5]
                         citationObject["publisher"] = i[6]
-                        citationObject["year_of_publishing"] = i[7]
+                        citationObject["journal"] = i[7]
+                        citationObject["volume"] = i[8]
+                        citationObject["page"] = i[9]
+                        citationObject["year_of_publishing"] = i[10]
                         citations.append(citationObject)
                         # We don't want to add duplicate citations for all the objects of the dataset
                         break

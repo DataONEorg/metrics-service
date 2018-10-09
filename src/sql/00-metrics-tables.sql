@@ -43,6 +43,9 @@ create table citations (
     origin TEXT,                  -- authors of the source dataset
     title TEXT,                   -- title of the dataset
     publisher TEXT,               -- publisher e.g. dataONE
+    journal TEXT,                 -- journal that published the dataset
+    volume TEXT,                  -- volume of the publication containing this document
+    page TEXT,                    -- page numbers of the publication containing this document
     year_of_publishing INTEGER,   -- YOP for the source dataset
     primary key(target_id, source_id, link_publication_date)
 );
