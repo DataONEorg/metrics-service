@@ -1,5 +1,5 @@
 DataONE Metrics Service implementation
-==============================
+======================================
 
 .. figure:: ../images/dataone-implementation.png
     :align: center

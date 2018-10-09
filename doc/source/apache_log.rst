@@ -13,6 +13,9 @@ server provide a good location for logging requests issued by the service.
    * - Property
      - Entry
      - Notes
+   * - ``ver``
+     - ``1.0``
+     - Version flag, indicating the revision of the log information. Must be incremented when format changes.
    * - ``time``
      - ``%{%Y-%m-%d}tT%{%T}t.%{msec_frac}tZ``
      - Time that the request started
@@ -65,7 +68,7 @@ server provide a good location for logging requests issued by the service.
 
 Apache configuration for logging search events::
 
-  LogFormat "{ \"time\":\"%{%Y-%m-%d}tT%{%T}t.%{msec_frac}tZ\", \"remoteIP\":\"%a\",
+  LogFormat "{ \"ver\":\"1.0\", \"time\":\"%{%Y-%m-%d}tT%{%T}t.%{msec_frac}tZ\", \"remoteIP\":\"%a\",
                \"request\":\"%U\", \"query\":\"%q\", \"method\":\"%m\", \"status\":\"%>s\",
                \"responseTime\":\"%T\", \"userAgent\":\"%{User-agent}i\",
                \"accessToken\":\"%{Authorization}i\", \"referer\":\"%{Referer}i\",
@@ -77,6 +80,7 @@ Example of output, reformatted for readability. Each log message appears as a si
 .. code-block:: json
 
     {
+      "ver": 1.0,
       "time": "2018-10-08T07:56:41.600Z",
       "remoteIP": "73.128.224.157",
       "request": "/cn/v2/meta/solson.18.1",
