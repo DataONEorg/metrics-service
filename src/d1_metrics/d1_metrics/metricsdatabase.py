@@ -283,7 +283,7 @@ class MetricsDatabase(object):
     dois, pref = self.getDOIs()
     csr = self.getCursor()
     sql = "INSERT INTO CITATIONS(id, report, metadata, target_id, source_id, source_url, link_publication_date, origin, title, " +\
-          "publisher, year_of_publishing) values ( DEFAULT,'"
+          "publisher, journal, volume, page, year_of_publishing) values ( DEFAULT,'"
 
     count = 0
     hist = {}
@@ -304,7 +304,7 @@ class MetricsDatabase(object):
             # print("Source {0:0=3d}".format(count), " - ", source_pid)
             try:
               url = val["Source"]["Identifier"]["IDUrl"]
-              headers = {'Accept': 'application/x-bibtex'}
+              headers = {'Accept': 'application/json'}
 
               values = []
               values.append(target_pid)
@@ -337,18 +337,40 @@ class MetricsDatabase(object):
                   values.append(str(metadata["message"]["created"]["date-parts"][0][0]))
               else:
                 # Format the response retrieved from the doi resolving endpoint and save it to a dictionary
-                mdata_resp = mdata.text[6:-1]
-                mdata_list = mdata_resp.split("\n")
-                metadata = {}
-                for i in mdata_list:
-                  key = i.split("=")
-                  if len(key) > 1:
-                    key[0] = key[0].strip()
-                    metadata[key[0]] = key[1][key[1].find("{")+1:key[1].rfind("}")]
-                values.append(metadata["author"].replace("'", r"''"))
+                # mdata_resp = mdata.text[6:-1]
+                # mdata_list = mdata_resp.split("\n")
+                # metadata = {}
+                # for i in mdata_list:
+                #   key = i.split("=")
+                #   if len(key) > 1:
+                #     key[0] = key[0].strip()
+                #     metadata[key[0]] = key[1][key[1].find("{")+1:key[1].rfind("}")]
+                metadata = mdata.json()
+                # print(metadata)
+                author = []
+                for i in metadata["author"]:
+                  if "given" in i:
+                    author.append((i["given"] + " " + i["family"]))
+                  elif "name" in i:
+                    author.append(i["name"])
+                  else:
+                    author.append('')
+                values.append(", ".join(author).replace("'", r"''"))
                 values.append(metadata["title"].replace("'", r"''"))
                 values.append(metadata["publisher"].replace("'", r"''"))
-                values.append(metadata["year"].replace("'", r"''"))
+                if "container-title" in metadata:
+                  values.append(metadata["container-title"].replace("'", r"''"))
+                else:
+                  values.append('NULL')
+                if "volume" in metadata:
+                  values.append(metadata["volume"].replace("'", r"''"))
+                else:
+                  values.append('NULL')
+                if "page" in metadata:
+                  values.append(metadata["page"].replace("'", r"''"))
+                else:
+                  values.append('NULL')
+                values.append(str(metadata["created"]["date-parts"][0][0]))
               csr.execute(sql + (json.dumps(results)).replace("'", r"''") + "','" + (json.dumps(metadata)).replace("'", r"''") + "','" + "','".join(values) + "');")
               print("A new citation record inserted!")
               pass
