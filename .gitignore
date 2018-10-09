@@ -137,3 +137,4 @@ ENV/
 # mypy
 .mypy_cache/
 
+src/d1_metrics/d1_metrics/reports/
