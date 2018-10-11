@@ -1,15 +1,8 @@
-MDC Log Processing Architecture
-===============================
-
-.. TODO: Describe the architecture of how the components interact
+Log Processing Architecture
+===========================
 
 Component Diagram
 -----------------
-..
-  @startuml mdc-log-processing-architecture.png
-
-
-    !include plantuml-styles.txt
 
 .. uml::
     
@@ -22,6 +15,7 @@ Component Diagram
     MN + CN events
     ]
 
+
     frame "Coordinating Node" as "cnserv" <<Server>> {
         frame "d1-processing" as "logagg" {
             [Log Aggregation] <<Service>>
@@ -30,7 +24,7 @@ Component Diagram
         database "logsolr" {
         }
         
-        folder "Logs" as logs{
+        folder "Event Logs" as logs{
             component [JSON Log File] <<log>>
         }
         
@@ -39,6 +33,19 @@ Component Diagram
         }
         
         [filebeat] as cn.filebeat <<Service>>
+
+        [Log Aggregation] -down-> logs: "Events written to\nJSON log files"
+        [Log Aggregation] -right-> logsolr: "Events stored\nin logsolr index"
+        logs --> [cn.filebeat]:  ""
+        apache -->  [cn.filebeat] : ""
+    }
+
+    frame "search.dataone.org" as "search" <<Server>> {
+        frame "Apache Logs" as "search.apache" {
+            component [Apache Log File] as search.logs <<log>>
+        }
+        [filebeat] as search.filebeat <<Service>>
+        search.logs --> [search.filebeat]:  ""
     }
     
     frame "Log Proc Server" as "logproc" <<Server>> {
@@ -54,13 +61,10 @@ Component Diagram
     
     ' Define the interactions
     comp1 --> [Log Aggregation]: ""
-    [Log Aggregation] -down-> logs: "Events written to\nJSON log files [1]"
-    [Log Aggregation] -right-> logsolr: "Events stored\nin logsolr index"
-    logs --> [cn.filebeat]:  ""
-    apache -->  [cn.filebeat] : ""
     TCP_5705 .. [Log Stash] : ""
     [cn.filebeat] ..> TCP_5705 : ""
-    [Log Stash] --> [Log Stash] : "Filtering and\nSession Calculation [2]"
+    [search.filebeat] ..> TCP_5705 : ""
+    [Log Stash] --> [Log Stash] : "Filtering and\nSession Calculation"
     [Log Stash] --> [Elastic Search] : ""
     comp2 -right-> [Elastic Search] : "Query for the log records"
 
@@ -70,6 +74,5 @@ runs within the ``d1-processing`` application. Events are written to both a
 solr index and to JSON format log files. The log files are monitored by 
 ``filebeat`` and forwarded to a ``logstash`` service. The ``logstash`` service 
 applies geocoding, robots identification, and user agent matching before adding 
-to an ``elasticseach`` instance. [1] The current implementation uses a python 
-script to retrieve events from the solr index and write to JSON log files. 
+to an ``elasticseach`` instance.
 
