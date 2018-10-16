@@ -537,10 +537,14 @@ class MetricsReader:
 
         self.logger.debug("getSummaryMetricsPerCatalog #004")
         partialResolveCatalogPID = partial(self.resolveCatalogPID, return_dict, a_type)
-        with multiprocessing.Pool() as pool:
-            pool.map(partialResolveCatalogPID, catalogPIDs)
-            pool.close()
-            pool.join()
+        #with multiprocessing.Pool() as pool:
+        #    pool.map(partialResolveCatalogPID, catalogPIDs)
+        #    pool.close()
+        #    pool.join()
+        for pid in catalogPIDs:
+            self.logger.debug("getSummaryMetricsPerCatalog #004.5 pid=%s", pid)
+            self.resolveCatalogPID(return_dict, a_type, pid)
+
         self.logger.debug("getSummaryMetricsPerCatalog #005")
 
         for subProcess in masterProcess:
