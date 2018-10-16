@@ -40,6 +40,7 @@ class MetricsReader:
         self.request = {}
         self.response = {}
         self.logger = logging.getLogger('metrics_service.' + __name__)
+        self.req_session = requests.session()
 
 
     def on_get(self, req, resp):
@@ -407,7 +408,7 @@ class MetricsReader:
 
         queryString = 'q={!join from=resourceMap to=resourceMap}id:"' + PIDstring + '"&fl=id&wt=json'
 
-        resp = requests.get(url=self._config["solr_query_url"], params=queryString)
+        resp = self.req_session.get(url=self._config["solr_query_url"], params=queryString)
 
         if (resp.status_code == 200):
             PIDs = self.parseResponse(resp, PIDs)
@@ -430,7 +431,7 @@ class MetricsReader:
             # Getting length of the array from previous iteration to control the loop
             prevLength = len(PIDs)
 
-            resp = requests.post(url=self._config["solr_query_url"], files=queryDict)
+            resp = self.req_session.post(url=self._config["solr_query_url"], files=queryDict)
 
             if (resp.status_code == 200):
                 PIDs = self.parseResponse(resp, PIDs)
@@ -684,12 +685,12 @@ class MetricsReader:
 
 
 
-    def resolveCatalogPID(self, return_dict, type, PID):
+    def resolveCatalogPID(self, return_dict, a_type, PID):
         PIDs = []
         PIDs.append(PID)
-        if(type == "catalog"):
+        if(a_type == "catalog"):
             return_dict[PID] = self.resolvePIDs(PIDs)
-        if(type == "package"):
+        if(a_type == "package"):
             return_dict[PID] = self.resolvePackagePIDs(PIDs)
 
 
@@ -700,6 +701,7 @@ class MetricsReader:
         :param PID:
         :return: A list of pids for previous versions and their data + metadata objects
         """
+        self.logger.debug("enter resolvePackagePIDs")
         callSolr = True
 
         while (callSolr):
@@ -717,7 +719,7 @@ class MetricsReader:
             # Getting length of the array from previous iteration to control the loop
             prevLength = len(PIDs)
 
-            resp = requests.post(url=self._config["solr_query_url"], files=queryDict)
+            resp = self.req_session.post(url=self._config["solr_query_url"], files=queryDict)
 
             if (resp.status_code == 200):
                 PIDs = self.parseResponse(resp, PIDs)
@@ -725,6 +727,7 @@ class MetricsReader:
             if (prevLength == len(PIDs)):
                 callSolr = False
 
+        self.logger.debug("exit resolvePackagePIDs")
         return PIDs
 
 
@@ -734,7 +737,7 @@ class MetricsReader:
         # Forming the query dictionary to be sent as a file to the Solr endpoint via the HTTP Post request.
         queryString = 'q=id:"' + PID + '"&fl=obsoletes&wt=json'
 
-        resp = requests.get(url=self._config["solr_query_url"], params=queryString)
+        resp = self.req_session.get(url=self._config["solr_query_url"], params=queryString)
 
         if (resp.status_code == 200):
             PIDs = self.parseResponse(resp, [])
