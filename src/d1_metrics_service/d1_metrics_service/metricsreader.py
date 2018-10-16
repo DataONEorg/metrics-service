@@ -146,19 +146,19 @@ class MetricsReader:
 
         # Getting Obsoletes dictionary
         manager = multiprocessing.Manager()
-        masterProcess = []
         obsoletes_dict = manager.dict()
 
+        #partialResolveDataPackagePID = partial(self.resolveDataPackagePID, obsoletes_dict)
 
-        partialResolveDataPackagePID = partial(self.resolveDataPackagePID, obsoletes_dict)
-
-        #with multiprocessing.Pool() as pool:
-        #    pool.map(partialResolveDataPackagePID, PIDs)
-        #    pool.close()
-        #    pool.join()
-        for pid in PIDs:
-            self.logger.debug("getSummaryMetricsPerDataset #004.5 pid=%s", pid)
-            self.resolveDataPackagePID(obsoletes_dict, pid)
+        with multiprocessing.Pool() as pool:
+            for pid in PIDs:
+              pool.apply_async(self.resolveDataPackagePID, obsoletes_dict, pid)
+            #pool.map(partialResolveDataPackagePID, PIDs)
+            pool.close()
+            pool.join()
+        #for pid in PIDs:
+        #    self.logger.debug("getSummaryMetricsPerDataset #004.5 pid=%s", pid)
+        #    self.resolveDataPackagePID(obsoletes_dict, pid)
 
         aggregatedPIDs = {}
         for i in PIDs:
@@ -539,14 +539,16 @@ class MetricsReader:
 
 
         self.logger.debug("getSummaryMetricsPerCatalog #004")
-        partialResolveCatalogPID = partial(self.resolveCatalogPID, return_dict, a_type)
-        #with multiprocessing.Pool() as pool:
-        #    pool.map(partialResolveCatalogPID, catalogPIDs)
-        #    pool.close()
-        #    pool.join()
-        for pid in catalogPIDs:
-            self.logger.debug("getSummaryMetricsPerCatalog #004.5 pid=%s", pid)
-            self.resolveCatalogPID(return_dict, a_type, pid)
+        #partialResolveCatalogPID = partial(self.resolveCatalogPID, return_dict, a_type)
+        with multiprocessing.Pool() as pool:
+            for pid in catalogPIDs:
+              pool.apply_async(self.resolveCatalogPID(return_dict, a_type, pid))
+            #pool.map(partialResolveCatalogPID, catalogPIDs)
+            pool.close()
+            pool.join()
+        #for pid in catalogPIDs:
+        #    self.logger.debug("getSummaryMetricsPerCatalog #004.5 pid=%s", pid)
+        #    self.resolveCatalogPID(return_dict, a_type, pid)
 
         self.logger.debug("getSummaryMetricsPerCatalog #005")
 
