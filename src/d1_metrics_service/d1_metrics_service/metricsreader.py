@@ -391,15 +391,17 @@ class MetricsReader:
 
 
 
-    def resolvePIDs(self, PIDs):
+    def resolvePIDs(self, PIDs, req_session=None):
         """
         Checks for the versions and obsolecence chain of the given PID
         :param PID:
         :return: A list of pids for previous versions and their data + metadata objects
         """
 
+        if req_session is None:
+            req_session = requests.Session()
+
         PIDstring = PIDs[0]
-        req_session = requests.Session()
 
         # get the ids for all the previous versions and their data / metadata object till the current `pid` version
         # p.s. this might not be the latest version!
@@ -689,14 +691,15 @@ class MetricsReader:
     def resolveCatalogPID(self, return_dict, a_type, PID):
         PIDs = []
         PIDs.append(PID)
+        req_session = requests.Session()
         if(a_type == "catalog"):
-            return_dict[PID] = self.resolvePIDs(PIDs)
+            return_dict[PID] = self.resolvePIDs(PIDs, req_session=req_session)
         if(a_type == "package"):
-            return_dict[PID] = self.resolvePackagePIDs(PIDs)
+            return_dict[PID] = self.resolvePackagePIDs(PIDs, req_session=req_session)
 
 
 
-    def resolvePackagePIDs(self, PIDs):
+    def resolvePackagePIDs(self, PIDs, req_session=None):
         """
         Checks for the versions and obsolecence chain of the given PID
         :param PID:
@@ -704,7 +707,8 @@ class MetricsReader:
         """
         self.logger.debug("enter resolvePackagePIDs")
         callSolr = True
-        req_session = requests.Session()
+        if req_session is None:
+            req_session = requests.Session()
         while (callSolr):
 
             # Querying for all the PIDs that we got from the previous iteration
@@ -733,12 +737,14 @@ class MetricsReader:
 
 
 
-    def resolveDataPackagePID(self, obsoletes_dict, PID):
+    def resolveDataPackagePID(self, obsoletes_dict, PID, req_session=None):
 
+        if req_session is None:
+            req_session = requests.Session()
         # Forming the query dictionary to be sent as a file to the Solr endpoint via the HTTP Post request.
         queryString = 'q=id:"' + PID + '"&fl=obsoletes&wt=json'
 
-        resp = requests.get(url=self._config["solr_query_url"], params=queryString)
+        resp = req_session.get(url=self._config["solr_query_url"], params=queryString)
 
         if (resp.status_code == 200):
             PIDs = self.parseResponse(resp, [])
