@@ -972,7 +972,7 @@ class MetricsElasticSearch(object):
     if(after_record is not None):
       search_body["aggs"]["pid_list"]["composite"]["after"] = {}
       search_body["aggs"]["pid_list"]["composite"]["after"] = after_record
-    self._L.info("Request: \n%s", json.dumps(search_body, indent=2))
+    self._L.debug("Request: %s", str(search_body))
     resp = self._es.search(body=search_body, request_timeout=None)
     return(resp)
 
