@@ -1,5 +1,9 @@
 """
 Metrics Reader module
+
+Implemented as a falcon web application, https://falcon.readthedocs.io/en/stable/
+
+
 """
 import json
 import falcon
@@ -14,6 +18,7 @@ from multiprocessing import Pool
 import multiprocessing
 from datetime import datetime
 from functools import partial
+import logging
 
 
 
@@ -25,7 +30,7 @@ DEFAULT_REPORT_CONFIGURATION={
 
 class MetricsReader:
     """
-    This class parses the metricsRequest obeject
+    This class parses the metricsRequest object
     and based on the filters queries the Elastic Search for
     results
     """
@@ -34,15 +39,19 @@ class MetricsReader:
         self._config = DEFAULT_REPORT_CONFIGURATION
         self.request = {}
         self.response = {}
+        self.logger = logging.getLogger('metrics_service.' + __name__)
+
 
     def on_get(self, req, resp):
         """
-        The method assigned to the post end point
+        The method assigned to the GET end point
+
         :param req: HTTP Request object
         :param resp: HTTP Response object
         :return: HTTP Response object
         """
         #taking query parametrs from the HTTP GET request and forming metricsRequest Object
+        self.logger.debug("enter on_get")
         metrics_request = {}
         query_param = urlparse(unquote(req.url))
 
@@ -56,6 +65,7 @@ class MetricsReader:
         # status returned by the framework, but it is included here to
         # illustrate how this may be overridden as needed.
         resp.status = falcon.HTTP_200
+        self.logger.debug("exit on_get")
 
 
 
@@ -66,6 +76,7 @@ class MetricsReader:
         :param resp: HTTP Response object
         :return: HTTP Response object
         """
+        self.logger.debug("enter on_post")
         request_string = req.stream.read().decode('utf8')
 
         metrics_request = json.loads(request_string)
@@ -76,6 +87,7 @@ class MetricsReader:
         # status returned by the framework, but it is included here to
         # illustrate how this may be overridden as needed.
         resp.status = falcon.HTTP_200
+        self.logger.debug("exit on_post")
 
 
 
@@ -85,6 +97,7 @@ class MetricsReader:
         MetricsRequest object
         :return: MetricsResponse Object
         """
+        self.logger.debug("enter process_request")
         self.request = metrics_request
         self.response["metricsRequest"] = metrics_request
         metrics_page = self.request['metricsPage']
@@ -109,6 +122,7 @@ class MetricsReader:
         self.response["results"] = results
         self.response["resultDetails"] = resultDetails
 
+        self.logger.debug("exit process_request")
         return self.response
 
 
