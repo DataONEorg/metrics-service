@@ -9,8 +9,12 @@ We create unique resource and map to its endpoint.
 
 
 import falcon
+import logging
 
 from .metricsreader import MetricsReader
+
+
+logging.basicConfig(level=logging.DEBUG)
 
 api = application = falcon.API() # pylint: disable=invalid-name
 
@@ -20,3 +24,4 @@ metrics_handler_resource = MetricsReader() # pylint: disable=invalid-name
 # Mapping the HTTP endpoint with its unique resource.
 # Used for both the GET and the POST endpoints
 api.add_route('/metrics', metrics_handler_resource)
+
