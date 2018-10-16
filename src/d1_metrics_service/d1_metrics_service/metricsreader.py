@@ -99,6 +99,7 @@ class MetricsReader:
         MetricsRequest object
         :return: MetricsResponse Object
         """
+        t_0 = time.time()
         self.logger.debug("enter process_request. metrics_request=%s", str(metrics_request))
         self.request = metrics_request
         self.response["metricsRequest"] = metrics_request
@@ -109,26 +110,29 @@ class MetricsReader:
         results = {}
         resultDetails = []
         if (len(filter_by) > 0):
-            if filter_by[0]['filterType'] == "dataset" and filter_by[0]['interpretAs'] == "list":
-                if(len(filter_by[0]['values']) == 1):
-                    self.logger.debug("process_request #005")
+            filter_type = filter_by[0]['filterType'].lower()
+            interpret_as = filter_by[0]['interpretAs'].lower()
+            n_filter_values = len(filter_by[0]['values'])
+            self.logger.debug("process_request: filter_type=%s, interpret_as=%s, n_filter_values=%d",
+                              filter_type, interpret_as, n_filter_values)
+            if filter_type == "dataset" and interpret_as == "list":
+                if n_filter_values == 1:
                     results, resultDetails = self.getSummaryMetricsPerDataset(filter_by[0]["values"])
 
-            if (filter_by[0]['filterType'] == "catalog" or filter_by[0]['filterType'] == "package")  and filter_by[0]['interpretAs'] == "list":
-                if(filter_by[0]['filterType'] == "catalog" and len(filter_by[0]['values']) == 1 ):
-                    self.logger.debug("process_request #006")
+            if (filter_type == "catalog" or filter_type == "package") and interpret_as == "list":
+                if filter_type == "catalog" and n_filter_values == 1:
                     results, resultDetails = self.getSummaryMetricsPerDataset(filter_by[0]["values"])
-                if(filter_by[0]['filterType'] == "package" and len(filter_by[0]['values']) == 1 ):
-                    self.logger.debug("process_request #007")
-                    results, resultDetails = self.getSummaryMetricsPerCatalog(filter_by[0]["values"], filter_by[0]['filterType'])
-                if(len(filter_by[0]['values']) > 1):
-                    self.logger.debug("process_request #008")
-                    results, resultDetails = self.getSummaryMetricsPerCatalog(filter_by[0]["values"], filter_by[0]['filterType'])
+
+                if filter_type == "package" and n_filter_values == 1:
+                    results, resultDetails = self.getSummaryMetricsPerCatalog(filter_by[0]["values"], filter_type)
+
+                if n_filter_values > 1:
+                    #Called when browsing the search UI for example
+                    results, resultDetails = self.getSummaryMetricsPerCatalog(filter_by[0]["values"], filter_type)
 
         self.response["results"] = results
         self.response["resultDetails"] = resultDetails
-
-        self.logger.debug("exit process_request")
+        self.logger.debug("exit process_request, duration=%fsec", time.time()-t_0)
         return self.response
 
 
@@ -530,7 +534,7 @@ class MetricsReader:
         :param requestPIDArray: Array of PIDs of datasets on DataCatalog page or Search page
         :return:
         """
-
+        t_0 = time.time()
         self.logger.debug("enter getSummaryMetricsPerCatalog")
         manager = multiprocessing.Manager()
         catalogPIDs = {}
@@ -545,28 +549,26 @@ class MetricsReader:
 
         return_dict = manager.dict()
 
+        req_session = requests.Session()
 
         self.logger.debug("getSummaryMetricsPerCatalog #004")
         #partialResolveCatalogPID = partial(self.resolveCatalogPID, return_dict, a_type)
-        with multiprocessing.Pool() as pool:
-            for pid in catalogPIDs:
-              pool.apply_async(self.resolveCatalogPID(return_dict, a_type, pid))
-            #pool.map(partialResolveCatalogPID, catalogPIDs)
-            pool.close()
-            pool.join()
-        #for pid in catalogPIDs:
-        #    self.logger.debug("getSummaryMetricsPerCatalog #004.5 pid=%s", pid)
-        #    self.resolveCatalogPID(return_dict, a_type, pid)
+        #with multiprocessing.Pool() as pool:
+        #    for pid in catalogPIDs:
+        #      pool.apply_async(self.resolveCatalogPID(return_dict, a_type, pid))
+        #    pool.close()
+        #    pool.join()
+        for pid in catalogPIDs:
+            self.logger.debug("getSummaryMetricsPerCatalog #004.5 pid=%s", pid)
+            self.resolveCatalogPID(return_dict, a_type, pid, req_session=req_session)
 
         self.logger.debug("getSummaryMetricsPerCatalog #005")
 
         for subProcess in masterProcess:
             subProcess.join()
 
-        # catalogPIDs = return_dict
         for i in catalogPIDs:
             catalogPIDs[i] = return_dict[i]
-        # print(return_dict)
 
         for i in catalogPIDs:
             combinedPIDs.extend(catalogPIDs[i])
@@ -646,6 +648,7 @@ class MetricsReader:
 
         # return {}, {}
         # return data, {}
+        self.logger.debug("exit getSummaryMetricsPerCatalog, duration=%fsec", time.time()-t_0)
         return (self.formatDataPerCatalog(data, catalogPIDs))
 
 
@@ -692,13 +695,14 @@ class MetricsReader:
 
 
 
-    def resolveCatalogPID(self, return_dict, a_type, PID):
+    def resolveCatalogPID(self, return_dict, filter_type, PID, req_session=None):
         PIDs = []
         PIDs.append(PID)
-        req_session = requests.Session()
-        if(a_type == "catalog"):
+        if req_session is None:
+            req_session = requests.Session()
+        if filter_type == "catalog":
             return_dict[PID] = self.resolvePIDs(PIDs, req_session=req_session)
-        if(a_type == "package"):
+        if filter_type == "package":
             return_dict[PID] = self.resolvePackagePIDs(PIDs, req_session=req_session)
 
 
