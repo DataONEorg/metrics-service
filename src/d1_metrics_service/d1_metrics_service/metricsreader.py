@@ -151,7 +151,7 @@ class MetricsReader:
 
         #partialResolveDataPackagePID = partial(self.resolveDataPackagePID, obsoletes_dict)
 
-        with multiprocessing.Pool() as pool:
+        with multiprocessing.Pool(processes=16) as pool:
             for pid in PIDs:
               pool.apply_async(self.resolveDataPackagePID, obsoletes_dict, pid)
             #pool.map(partialResolveDataPackagePID, PIDs)
