@@ -399,6 +399,7 @@ class MetricsReader:
         """
 
         PIDstring = PIDs[0]
+        req_session = requests.Session()
 
         # get the ids for all the previous versions and their data / metadata object till the current `pid` version
         # p.s. this might not be the latest version!
@@ -408,7 +409,7 @@ class MetricsReader:
 
         queryString = 'q={!join from=resourceMap to=resourceMap}id:"' + PIDstring + '"&fl=id&wt=json'
 
-        resp = self.req_session.get(url=self._config["solr_query_url"], params=queryString)
+        resp = req_session.get(url=self._config["solr_query_url"], params=queryString)
 
         if (resp.status_code == 200):
             PIDs = self.parseResponse(resp, PIDs)
@@ -431,7 +432,7 @@ class MetricsReader:
             # Getting length of the array from previous iteration to control the loop
             prevLength = len(PIDs)
 
-            resp = self.req_session.post(url=self._config["solr_query_url"], files=queryDict)
+            resp = req_session.post(url=self._config["solr_query_url"], files=queryDict)
 
             if (resp.status_code == 200):
                 PIDs = self.parseResponse(resp, PIDs)
@@ -703,7 +704,7 @@ class MetricsReader:
         """
         self.logger.debug("enter resolvePackagePIDs")
         callSolr = True
-
+        req_session = requests.Session()
         while (callSolr):
 
             # Querying for all the PIDs that we got from the previous iteration
@@ -719,7 +720,7 @@ class MetricsReader:
             # Getting length of the array from previous iteration to control the loop
             prevLength = len(PIDs)
 
-            resp = self.req_session.post(url=self._config["solr_query_url"], files=queryDict)
+            resp = req_session.post(url=self._config["solr_query_url"], files=queryDict)
 
             if (resp.status_code == 200):
                 PIDs = self.parseResponse(resp, PIDs)
@@ -737,7 +738,7 @@ class MetricsReader:
         # Forming the query dictionary to be sent as a file to the Solr endpoint via the HTTP Post request.
         queryString = 'q=id:"' + PID + '"&fl=obsoletes&wt=json'
 
-        resp = self.req_session.get(url=self._config["solr_query_url"], params=queryString)
+        resp = requests.get(url=self._config["solr_query_url"], params=queryString)
 
         if (resp.status_code == 200):
             PIDs = self.parseResponse(resp, [])
