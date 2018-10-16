@@ -97,7 +97,7 @@ class MetricsReader:
         MetricsRequest object
         :return: MetricsResponse Object
         """
-        self.logger.debug("enter process_request")
+        self.logger.debug("enter process_request. metrics_request=%s", str(metrics_request))
         self.request = metrics_request
         self.response["metricsRequest"] = metrics_request
         metrics_page = self.request['metricsPage']
@@ -109,14 +109,18 @@ class MetricsReader:
         if (len(filter_by) > 0):
             if filter_by[0]['filterType'] == "dataset" and filter_by[0]['interpretAs'] == "list":
                 if(len(filter_by[0]['values']) == 1):
+                    self.logger.debug("process_request #005")
                     results, resultDetails = self.getSummaryMetricsPerDataset(filter_by[0]["values"])
 
             if (filter_by[0]['filterType'] == "catalog" or filter_by[0]['filterType'] == "package")  and filter_by[0]['interpretAs'] == "list":
                 if(filter_by[0]['filterType'] == "catalog" and len(filter_by[0]['values']) == 1 ):
+                    self.logger.debug("process_request #006")
                     results, resultDetails = self.getSummaryMetricsPerDataset(filter_by[0]["values"])
                 if(filter_by[0]['filterType'] == "package" and len(filter_by[0]['values']) == 1 ):
+                    self.logger.debug("process_request #007")
                     results, resultDetails = self.getSummaryMetricsPerCatalog(filter_by[0]["values"], filter_by[0]['filterType'])
                 if(len(filter_by[0]['values']) > 1):
+                    self.logger.debug("process_request #008")
                     results, resultDetails = self.getSummaryMetricsPerCatalog(filter_by[0]["values"], filter_by[0]['filterType'])
 
         self.response["results"] = results
@@ -508,7 +512,7 @@ class MetricsReader:
 
 
 
-    def getSummaryMetricsPerCatalog(self, requestPIDArray, type):
+    def getSummaryMetricsPerCatalog(self, requestPIDArray, a_type):
         """
         Queries the Elastic Search and retrieves the summary metrics for a given DataCatalog pid Array.
         This information is used to populate the DataCatalog and Search pages.
@@ -532,7 +536,7 @@ class MetricsReader:
 
 
         self.logger.debug("getSummaryMetricsPerCatalog #004")
-        partialResolveCatalogPID = partial(self.resolveCatalogPID, return_dict, type)
+        partialResolveCatalogPID = partial(self.resolveCatalogPID, return_dict, a_type)
         with multiprocessing.Pool() as pool:
             pool.map(partialResolveCatalogPID, catalogPIDs)
             pool.close()
