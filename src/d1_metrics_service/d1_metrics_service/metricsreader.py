@@ -150,12 +150,15 @@ class MetricsReader:
         obsoletes_dict = manager.dict()
 
 
-        pool = multiprocessing.Pool()
         partialResolveDataPackagePID = partial(self.resolveDataPackagePID, obsoletes_dict)
 
-        pool.map(partialResolveDataPackagePID, PIDs)
-        pool.close()
-        pool.join()
+        #with multiprocessing.Pool() as pool:
+        #    pool.map(partialResolveDataPackagePID, PIDs)
+        #    pool.close()
+        #    pool.join()
+        for pid in PIDs:
+            self.logger.debug("getSummaryMetricsPerDataset #004.5 pid=%s", pid)
+            self.resolveDataPackagePID(obsoletes_dict, pid)
 
         aggregatedPIDs = {}
         for i in PIDs:
