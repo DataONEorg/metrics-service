@@ -516,6 +516,7 @@ class MetricsReader:
         :return:
         """
 
+        self.logger.debug("enter getSummaryMetricsPerCatalog")
         manager = multiprocessing.Manager()
         catalogPIDs = {}
         combinedPIDs = []
@@ -530,13 +531,13 @@ class MetricsReader:
         return_dict = manager.dict()
 
 
-        pool = multiprocessing.Pool()
+        self.logger.debug("getSummaryMetricsPerCatalog #004")
         partialResolveCatalogPID = partial(self.resolveCatalogPID, return_dict, type)
-
-        pool.map(partialResolveCatalogPID, catalogPIDs)
-        pool.close()
-        pool.join()
-
+        with multiprocessing.Pool() as pool:
+            pool.map(partialResolveCatalogPID, catalogPIDs)
+            pool.close()
+            pool.join()
+        self.logger.debug("getSummaryMetricsPerCatalog #005")
 
         for subProcess in masterProcess:
             subProcess.join()
