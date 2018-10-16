@@ -19,6 +19,7 @@ import multiprocessing
 from datetime import datetime
 from functools import partial
 import logging
+import time
 
 
 
@@ -139,31 +140,28 @@ class MetricsReader:
         :param PIDs:
         :return: A dictionary containing lists of all the facets specified in the metrics_request
         """
+        t_start = time.time()
         metrics_elastic_search = MetricsElasticSearch()
         metrics_elastic_search.connect()
         PIDs = self.resolvePIDs(PIDs)
-        obsoletesDictionary = {}
-        # print(PIDs)
+        t_delta = time.time() - t_start
+        self.logger.debug('getSummaryMetricsPerDataset:t1=%.4f', t_delta)
 
         # Getting Obsoletes dictionary
         manager = multiprocessing.Manager()
         obsoletes_dict = manager.dict()
 
-        #partialResolveDataPackagePID = partial(self.resolveDataPackagePID, obsoletes_dict)
-        map_params =[]
-        for pid in PIDs:
-            map_params.append( (obsoletes_dict, pid) )
-
-        with multiprocessing.Pool(processes=16) as pool:
-            pool.starmap(self.resolveDataPackagePID, map_params, chunk_size=8)
-            #for pid in PIDs:
-            #  pool.apply_async(self.resolveDataPackagePID, obsoletes_dict, pid)
-            #pool.map(partialResolveDataPackagePID, PIDs)
+        with multiprocessing.Pool() as pool:
+            for pid in PIDs:
+              pool.apply_async(self.resolveDataPackagePID, obsoletes_dict, pid)
             pool.close()
             pool.join()
         #for pid in PIDs:
         #    self.logger.debug("getSummaryMetricsPerDataset #004.5 pid=%s", pid)
         #    self.resolveDataPackagePID(obsoletes_dict, pid)
+
+        t_delta = time.time() - t_start
+        self.logger.debug('getSummaryMetricsPerDataset:t2=%.4f', t_delta)
 
         aggregatedPIDs = {}
         for i in PIDs:
@@ -274,6 +272,8 @@ class MetricsReader:
 
         obsoletesDictionary = {k: str(v) for k, v in obsoletes_dict.items()}
 
+        t_delta = time.time() - t_start
+        self.logger.debug('getSummaryMetricsPerDataset:t3=%.4f', t_delta)
         return (self.formatDataPerDataset(data, PIDs, obsoletesDictionary))
 
 
