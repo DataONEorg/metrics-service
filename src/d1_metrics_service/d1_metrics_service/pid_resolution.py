@@ -162,7 +162,12 @@ def pidsAndSid(IDs, solr_url=None):
 
   async def _work(pids):
     with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as executor:
-      loop = asyncio.get_event_loop()
+      loop = None
+      try:
+        loop = asyncio.get_event_loop()
+      except RuntimeError as e:
+        _L.warning(str(e))
+        loop = asyncio.new_event_loop()
       tasks = []
       for an_id in pids:
         tasks.append(loop.run_in_executor(executor, _fetch, DEFAULT_SOLR, an_id ))
@@ -235,7 +240,12 @@ def getObsolescenceChain(IDs, solr_url=None, max_depth=20):
 
   async def _work(pids):
     with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as executor:
-      loop = asyncio.get_event_loop()
+      loop = None
+      try:
+        loop = asyncio.get_event_loop()
+      except RuntimeError as e:
+        _L.warning(str(e))
+        loop = asyncio.new_event_loop()
       tasks = []
       for an_id in pids:
         url = _defaults(solr_url) #call here as option for RR select
@@ -310,7 +320,12 @@ def getResolvePIDs(PIDs, solr_url=None):
 
   async def _work(pids):
     with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as executor:
-      loop = asyncio.get_event_loop()
+      loop = None
+      try:
+        loop = asyncio.get_event_loop()
+      except RuntimeError as e:
+        _L.warning(str(e))
+        loop = asyncio.new_event_loop()
       tasks = []
       for an_id in pids:
         url = _defaults(solr_url) #call here as option for RR select
