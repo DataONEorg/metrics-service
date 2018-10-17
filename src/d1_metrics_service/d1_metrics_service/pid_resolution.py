@@ -71,6 +71,37 @@ def _defaults(solr_url):
   return solr_url
 
 
+def getIdsFromSolrResponse(response_text, pids=[]):
+
+  data = json.loads(response_text)
+  for doc in data['response']['docs']:
+    try:
+      pid = doc['id']
+      if not pid in pids:
+        pids.append(pid)
+    except KeyError as e:
+      pass
+    try:
+      for pid in doc['documents']:
+        if not pid in pids:
+          pids.append(pid)
+    except KeyError as e:
+      pass
+    try:
+      pid = doc['obsoletes']
+      if not pid in pid:
+        pids.append(pid)
+    except KeyError as e:
+      pass
+    try:
+      for pid in doc['resourceMap']:
+        if not pid in pids:
+          pids.append(pid)
+    except KeyError as e:
+      pass
+  return pids
+
+
 def pidsAndSid(IDs, solr_url=None):
   '''
   For each provided ID, determine if it is a PID or a SID
@@ -144,7 +175,7 @@ def pidsAndSid(IDs, solr_url=None):
   return results
 
 
-def getObsolescenceChain(IDs, solr_url=None):
+def getObsolescenceChain(IDs, solr_url=None, max_depth=20):
   '''
   Get the obsolecence chains for pids in IDs
 
@@ -157,13 +188,13 @@ def getObsolescenceChain(IDs, solr_url=None):
   Args:
     solr_url: URL for the solr select endpoint
     pids: list of identifiers
-    session: a requests.Session instance for connection reuse or None
+    max_depth: Maximum length of obsolescence chain to explore, for self preservation
 
-  Returns: [list of pids including ID as the zeroth entry, ...]
+  Returns: {ID: [pids], ...}
 
   '''
   _L, t_0 = _getLogger()
-  results = []
+  results = {}
 
   def _fetch(url, an_id):
     session = requests.Session()
@@ -173,7 +204,8 @@ def getObsolescenceChain(IDs, solr_url=None):
               }
     obsoleted_pids = [an_id, ]
     more_work = True
-    while more_work:
+    depth = 1
+    while more_work and depth < max_depth:
       # query for any of the ids as PID or SID
       query = quoteTerm(obsoleted_pids[-1])
       params['q'] = "id:" + query + " OR seriesId:" + query
@@ -184,11 +216,15 @@ def getObsolescenceChain(IDs, solr_url=None):
           _L.warning("More than a single obsoleted entry returned for pid: %s", obsoleted_pids[-1])
         try:
           obsoleted_pids.append(data['response']['docs'][0]['obsoletes'])
+          depth += 1
         except IndexError as e:
           more_work = False
         except KeyError as e:
           more_work = False
       else:
+        more_work = False
+      if depth >= max_depth:
+        _L.warning("Recursion limit hit for PID: %s", an_id)
         more_work = False
     return obsoleted_pids
 
@@ -200,12 +236,86 @@ def getObsolescenceChain(IDs, solr_url=None):
         url = _defaults(solr_url) #call here as option for RR select
         tasks.append(loop.run_in_executor(executor, _fetch, url, an_id ))
       for response in await asyncio.gather(*tasks):
-        results.append( response )
+        results[response[0]] = response[1:]
+        #results.append( response )
 
   loop = asyncio.get_event_loop()
   loop.run_until_complete( _work(IDs) )
   _L.debug("elapsed:%fsec", time.time()-t_0)
   return results
+
+
+def getResolvePIDs(PIDs, solr_url=None):
+  '''
+  Implements same functionality as metricsreader.resolvePIDs, except works asynchronously for input pids
+
+  input: ["urn:uuid:f46dafac-91e4-4f5f-aaff-b53eab9fe863", ]
+  output: {"urn:uuid:f46dafac-91e4-4f5f-aaff-b53eab9fe863": ["urn:uuid:f46dafac-91e4-4f5f-aaff-b53eab9fe863",
+                                                             "knb.92123.1",
+                                                             "urn:uuid:d64e5f8b-c91c-487a-8ce7-0cd271194f34",
+                                                             "urn:uuid:bb01b2c8-5e6c-4645-903d-39dbdd8d4d56",
+                                                             "urn:uuid:d80dc5c2-bfd7-4023-87a3-9e47a2c57fbb",
+                                                             "urn:uuid:9609acb1-63f2-40c6-88e3-ca9a16b06c79",
+                                                             "urn:uuid:542141d3-ed5a-4d97-b759-28a17757b0b8",
+                                                             "urn:uuid:22ef5022-8ade-4549-acac-c18656dd2033",
+                                                             "urn:uuid:2cdf8adb-79c4-4b6c-875a-3e459c3817c7"],
+          }
+  Args:
+    PIDs:
+    solr_url:
+
+  Returns:
+  '''
+  _L, t_0 = _getLogger()
+  results = {}
+
+  def _fetch(url, an_id):
+    session = requests.Session()
+    result = []
+    #always return at least this identifier
+    result.append(an_id)
+    params = {'wt':'json',
+              'fl':'id',
+              'q.op':'OR',
+              }
+    params['q'] = "{!join from=resourceMap to=resourceMap}id:" + quoteTerm(an_id)
+    response = session.get(url, params=params)
+    if response.status_code == requests.codes.ok:
+      #continue
+      result = getIdsFromSolrResponse(response.text, result)
+      more_work = True
+      params['fl'] = 'id,documents,obsoletes,resourceMap'
+      while more_work:
+        current_length = len(result)
+        query = " ".join( map(quoteTerm, result) )
+        params['q'] = 'resourceMap:(' + query + ')'
+        response = session.get(url, params=params)
+        if response.status_code == requests.codes.ok:
+          result = getIdsFromSolrResponse(response.text, result)
+          if len(result) == current_length:
+            more_work = False
+        else:
+          more_work = False
+    return result
+
+  async def _work(pids):
+    with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as executor:
+      loop = asyncio.get_event_loop()
+      tasks = []
+      for an_id in pids:
+        url = _defaults(solr_url) #call here as option for RR select
+        tasks.append(loop.run_in_executor(executor, _fetch, url, an_id ))
+      for response in await asyncio.gather(*tasks):
+        results[ response[0] ] = response
+
+  loop = asyncio.get_event_loop()
+  loop.run_until_complete( _work(PIDs) )
+  _L.debug("elapsed:%fsec", time.time()-t_0)
+  return results
+
+
+
+
 
 
 if __name__ == "__main__":
@@ -238,9 +348,15 @@ if __name__ == "__main__":
     pprint(res, indent=2)
 
 
+  def eg_getResolvePids():
+    pids = ["urn:uuid:f46dafac-91e4-4f5f-aaff-b53eab9fe863", ]
+    res = getResolvePIDs(pids)
+    pprint(res, indent=2)
+
+
   #change verbosity of the urllib3.connectionpool logging
   logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
   logging.basicConfig(level=logging.DEBUG)
-  #eg_getPidsForSid()
-  eg_pidsAndSid()
-  eg_getObsolescenceChain()
+  #eg_pidsAndSid()
+  #eg_getObsolescenceChain()
+  eg_getResolvePids()
