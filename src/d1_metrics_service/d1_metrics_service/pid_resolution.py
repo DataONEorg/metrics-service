@@ -169,7 +169,12 @@ def pidsAndSid(IDs, solr_url=None):
       for response in await asyncio.gather(*tasks):
         results.append( response )
 
-  loop = asyncio.get_event_loop()
+  loop = None
+  try:
+    loop = asyncio.get_event_loop()
+  except RuntimeError as e:
+    _L.warning(str(e))
+    loop = asyncio.new_event_loop()
   loop.run_until_complete( _work(IDs) )
   _L.debug("elapsed:%fsec", time.time()-t_0)
   return results
@@ -239,7 +244,12 @@ def getObsolescenceChain(IDs, solr_url=None, max_depth=20):
         results[response[0]] = response[1:]
         #results.append( response )
 
-  loop = asyncio.get_event_loop()
+  loop = None
+  try:
+    loop = asyncio.get_event_loop()
+  except RuntimeError as e:
+    _L.warning(str(e))
+    loop = asyncio.new_event_loop()
   loop.run_until_complete( _work(IDs) )
   _L.debug("elapsed:%fsec", time.time()-t_0)
   return results
@@ -308,7 +318,12 @@ def getResolvePIDs(PIDs, solr_url=None):
       for response in await asyncio.gather(*tasks):
         results[ response[0] ] = response
 
-  loop = asyncio.get_event_loop()
+  loop = None
+  try:
+    loop = asyncio.get_event_loop()
+  except RuntimeError as e:
+    _L.warning(str(e))
+    loop = asyncio.new_event_loop()
   loop.run_until_complete( _work(PIDs) )
   _L.debug("elapsed:%fsec", time.time()-t_0)
   return results
