@@ -25,7 +25,6 @@ DEFAULT_REPORT_CONFIGURATION={
 }
 
 
-
 class MetricsReader:
     """
     This class parses the metricsRequest object
