@@ -13,14 +13,11 @@ from urllib.parse import quote_plus
 import requests
 from d1_metrics.metricselasticsearch import MetricsElasticSearch
 from d1_metrics.metricsdatabase import MetricsDatabase
-from multiprocessing import Process
-from multiprocessing import Pool
-import multiprocessing
 from datetime import datetime
-from functools import partial
 import logging
 import time
 
+from . import pid_resolution
 
 
 DEFAULT_REPORT_CONFIGURATION={
@@ -152,14 +149,15 @@ class MetricsReader:
         self.logger.debug('getSummaryMetricsPerDataset:t1=%.4f', t_delta)
 
         # Getting Obsoletes dictionary
-        manager = multiprocessing.Manager()
-        obsoletes_dict = manager.dict()
+        #manager = multiprocessing.Manager()
+        #obsoletes_dict = manager.dict()
 
-        with multiprocessing.Pool() as pool:
-            for pid in PIDs:
-              pool.apply_async(self.resolveDataPackagePID, obsoletes_dict, pid)
-            pool.close()
-            pool.join()
+        obsoletes_dict = pid_resolution.getObsolescenceChain( PIDs, max_depth=1 )
+        #with multiprocessing.Pool() as pool:
+        #    for pid in PIDs:
+        #      results[pid] = pool.apply_async(self.resolveDataPackagePID, obsoletes_dict, pid)
+        #    pool.close()
+        #    pool.join()
         #for pid in PIDs:
         #    self.logger.debug("getSummaryMetricsPerDataset #004.5 pid=%s", pid)
         #    self.resolveDataPackagePID(obsoletes_dict, pid)
@@ -405,7 +403,8 @@ class MetricsReader:
         :param PID:
         :return: A list of pids for previous versions and their data + metadata objects
         """
-
+        logger = logging.getLogger('resolvePIDs')
+        logger.debug("enter resolvePIDs")
         if req_session is None:
             req_session = requests.Session()
 
@@ -450,6 +449,8 @@ class MetricsReader:
             if (prevLength == len(PIDs)):
                 callSolr = False
 
+        logger.debug("resolvePIDs response = %s", json.dumps(PIDs))
+        logger.debug("exit resolvePIDs")
         return PIDs
 
 
@@ -483,10 +484,13 @@ class MetricsReader:
 
 
 
-    def gatherCitations(self, PIDs):
+    def gatherCitations(self, PIDs, metrics_database=None):
         # Retreive the citations if any!
-        metrics_database = MetricsDatabase()
-        metrics_database.connect()
+        t_0 = time.time()
+        self.logger.debug("enter gatherCitations")
+        if metrics_database is None:
+            metrics_database = MetricsDatabase()
+            metrics_database.connect()
         csr = metrics_database.getCursor()
         sql = 'SELECT target_id,source_id,source_url,link_publication_date,origin,title,publisher,journal,volume,page,year_of_publishing FROM citations;'
 
@@ -523,6 +527,7 @@ class MetricsReader:
             print('Database error!\n{0}', e)
         finally:
             pass
+        self.logger.debug("exit gatherCitations, elapsed=%fsec", time.time()-t_0)
         return (citationCount, citations)
 
 
@@ -536,7 +541,6 @@ class MetricsReader:
         """
         t_0 = time.time()
         self.logger.debug("enter getSummaryMetricsPerCatalog")
-        manager = multiprocessing.Manager()
         catalogPIDs = {}
         combinedPIDs = []
         masterProcess = []
@@ -547,22 +551,20 @@ class MetricsReader:
 
         self.catalogPIDs = catalogPIDs
 
-        return_dict = manager.dict()
-
-        req_session = requests.Session()
+        return_dict = {}
 
         self.logger.debug("getSummaryMetricsPerCatalog #004")
-        #partialResolveCatalogPID = partial(self.resolveCatalogPID, return_dict, a_type)
-        #with multiprocessing.Pool() as pool:
-        #    for pid in catalogPIDs:
-        #      pool.apply_async(self.resolveCatalogPID(return_dict, a_type, pid))
-        #    pool.close()
-        #    pool.join()
-        for pid in catalogPIDs:
-            self.logger.debug("getSummaryMetricsPerCatalog #004.5 pid=%s", pid)
-            self.resolveCatalogPID(return_dict, a_type, pid, req_session=req_session)
+        if a_type == "catalog":
+          return_dict = pid_resolution.getResolvePIDs(catalogPIDs)
+        elif a_type == "package":
+          return_dict = pid_resolution.getObsolescenceChain(catalogPIDs)
+        #    PIDs = self.resolvePackagePIDs([PID, ], req_session=req_session)
+        #return_dict[PID] = PIDs
 
-        self.logger.debug("getSummaryMetricsPerCatalog #005")
+        #for pid in catalogPIDs:
+        #    self.logger.debug("getSummaryMetricsPerCatalog #004.5 pid=%s", pid)
+        #    self.resolveCatalogPID(return_dict, a_type, pid, req_session=req_session)
+        self.logger.debug("getSummaryMetricsPerCatalog #005: %s", str(return_dict))
 
         for subProcess in masterProcess:
             subProcess.join()
@@ -668,8 +670,10 @@ class MetricsReader:
             # "tempDict" : []
         }
 
+        metrics_database = MetricsDatabase()
+        metrics_database.connect()
         for i in catalogPIDs:
-            count, cits = self.gatherCitations(catalogPIDs[i])
+            count, cits = self.gatherCitations(catalogPIDs[i], metrics_database=metrics_database)
             results["citations"].append(count)
 
         for i in data["aggregations"]["pid_list"]["buckets"]:
@@ -696,14 +700,26 @@ class MetricsReader:
 
 
     def resolveCatalogPID(self, return_dict, filter_type, PID, req_session=None):
-        PIDs = []
-        PIDs.append(PID)
+        '''
+        Given identifier, get all versions and obsoleted (catalog) or
+        Args:
+          return_dict:
+          filter_type:
+          PID:
+          req_session:
+
+        Returns:
+
+        '''
+
         if req_session is None:
             req_session = requests.Session()
         if filter_type == "catalog":
-            return_dict[PID] = self.resolvePIDs(PIDs, req_session=req_session)
+            PIDs = self.resolvePIDs([PID, ], req_session=req_session)
         if filter_type == "package":
-            return_dict[PID] = self.resolvePackagePIDs(PIDs, req_session=req_session)
+            PIDs = self.resolvePackagePIDs([PID, ], req_session=req_session)
+        return_dict[PID] = PIDs
+        return [PID, PIDs]
 
 
 
@@ -713,7 +729,9 @@ class MetricsReader:
         :param PID:
         :return: A list of pids for previous versions and their data + metadata objects
         """
-        self.logger.debug("enter resolvePackagePIDs")
+        logger = logging.getLogger('resolvePackagePIDs')
+        logger.debug("enter resolvePackagePIDs")
+
         callSolr = True
         if req_session is None:
             req_session = requests.Session()
@@ -740,7 +758,7 @@ class MetricsReader:
             if (prevLength == len(PIDs)):
                 callSolr = False
 
-        self.logger.debug("exit resolvePackagePIDs")
+        logger.debug("exit resolvePackagePIDs")
         return PIDs
 
 
@@ -751,15 +769,20 @@ class MetricsReader:
             req_session = requests.Session()
         # Forming the query dictionary to be sent as a file to the Solr endpoint via the HTTP Post request.
         queryString = 'q=id:"' + PID + '"&fl=obsoletes&wt=json'
+        params = {'q': 'id:"' + PID + '"',
+                  'fl': 'obsoletes',
+                  'wt': 'json'}
 
-        resp = req_session.get(url=self._config["solr_query_url"], params=queryString)
-
+        res = None
+        resp = req_session.get(url=self._config["solr_query_url"], params=params)
         if (resp.status_code == 200):
             PIDs = self.parseResponse(resp, [])
             if (len(PIDs) != 0):
                 obsoletes_dict[PID] = PIDs[0]
+                res = PIDs[0]
             else:
                 pass
+        return res
 
 
 
