@@ -1,8 +1,9 @@
-'''
+"""
 Uses the solr index to provide identifier resolution for packages, obsolescence, versions.
 
+IMPORTANT: Requires Python 3.5 or later
+"""
 
-'''
 import sys
 import time
 import logging
@@ -99,7 +100,7 @@ def pidsAndSid(IDs, solr_url=None):
               'fl': 'id,seriesId',
               }
     query = quoteTerm(an_id)
-    params['q'] = f'id:{query} OR seriesId:{query}'
+    params['q'] = 'id:' + query + ' OR seriesId:' + query
     response = requests.get(url, params=params)
     result = {'id': an_id,
               'pids': [],
