@@ -13,8 +13,9 @@ import logging
 
 from .metricsreader import MetricsReader
 
-
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG,
+                    format='%(asctime)s %(name)18s: %(message)s'
+                    )
 
 api = application = falcon.API() # pylint: disable=invalid-name
 

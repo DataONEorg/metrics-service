@@ -35,8 +35,6 @@ class MetricsReader:
         self.request = {}
         self.response = {}
         self.logger = logging.getLogger('metrics_service.' + __name__)
-        self.req_session = requests.session()
-
 
     def on_get(self, req, resp):
         """

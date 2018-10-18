@@ -30,7 +30,7 @@ def _getLogger():
   include a timestamp for when the logger is created.
   Returns: instance of logging.logger, timestamp
   '''
-  logger = logging.getLogger(sys._getframe(1).f_code.co_name)
+  logger = logging.getLogger()
   return logger, time.time()
 
 
@@ -171,8 +171,14 @@ def pidsAndSid(IDs, solr_url=None):
       return responses
 
   _L, t_0 = _getLogger()
+  _L.debug("Enter")
   _L.debug("Resolving %d identifiers", len(IDs))
-  loop = asyncio.get_event_loop()
+  try:
+    loop = asyncio.get_event_loop()
+  except RuntimeError as e:
+    _L.info("Creating new event loop.")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
   future = asyncio.ensure_future( _work(loop, IDs) )
   results = loop.run_until_complete( future )
   _L.debug("elapsed:%fsec", time.time()-t_0)
@@ -244,8 +250,13 @@ def getObsolescenceChain(IDs, solr_url=None, max_depth=20):
     return results
 
   _L, t_0 = _getLogger()
-  results = {}
-  loop = asyncio.get_event_loop()
+  _L.debug("Enter")
+  try:
+    loop = asyncio.get_event_loop()
+  except RuntimeError as e:
+    _L.info("Creating new event loop.")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
   future = asyncio.ensure_future( _work(loop, IDs) )
   results = loop.run_until_complete( future )
   _L.debug("elapsed:%fsec", time.time()-t_0)
@@ -273,8 +284,6 @@ def getResolvePIDs(PIDs, solr_url=None):
 
   Returns:
   '''
-  _L, t_0 = _getLogger()
-  results = {}
 
   def _fetch(url, an_id):
     session = requests.Session()
@@ -315,14 +324,22 @@ def getResolvePIDs(PIDs, solr_url=None):
       for response in await asyncio.gather(*tasks):
         results[ response[0] ] = response
 
-  loop = asyncio.get_event_loop()
+  _L, t_0 = _getLogger()
+  results = {}
+  _L.debug("Enter")
+  # In a multithreading environment such as under gunicorn, the new thread created by
+  # gevent may not provide an event loop. Create a new one if necessary.
+  try:
+    loop = asyncio.get_event_loop()
+  except RuntimeError as e:
+    _L.info("Creating new event loop.")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
   future = asyncio.ensure_future(_work(PIDs))
   loop.run_until_complete( future )
   _L.debug("elapsed:%fsec", time.time()-t_0)
   return results
-
-
-
 
 
 
@@ -364,7 +381,7 @@ if __name__ == "__main__":
 
   #change verbosity of the urllib3.connectionpool logging
   #logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
-  logging.basicConfig(level=logging.DEBUG)
+  logging.basicConfig(level=logging.DEBUG, format='%(threadName)10s %(name)18s: %(message)s')
   eg_pidsAndSid()
   eg_getObsolescenceChain()
   eg_getResolvePids()
