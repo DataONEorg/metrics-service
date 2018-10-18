@@ -85,7 +85,6 @@ class MetricsReader:
         self.logger.debug("exit on_post")
 
 
-
     def process_request(self, metrics_request):
         """
         This method parses the filters of the
