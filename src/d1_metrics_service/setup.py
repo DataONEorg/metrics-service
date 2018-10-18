@@ -77,7 +77,8 @@ setup(
     'dateparser>=0.7.0',
     'requests>=2.19.1',
     'psycopg2>=2.7.5',
-    'schedule>=0.5.0'
+    'schedule>=0.5.0',
+    'aiohttp>=3.4',
   ],
 
   # List additional groups of dependencies here (e.g. development
