@@ -23,7 +23,6 @@ DEFAULT_REPORT_CONFIGURATION={
     "solr_query_url": "https://cn.dataone.org/cn/v2/query/solr/?"
 }
 
-
 class MetricsReader:
     """
     This class parses the metricsRequest object

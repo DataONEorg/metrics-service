@@ -10,6 +10,7 @@ import logging
 import requests
 import json
 import asyncio
+from aiohttp import ClientSession
 import concurrent.futures
 
 
@@ -122,65 +123,57 @@ def pidsAndSid(IDs, solr_url=None):
 
   Returns: [{'id':an_id, 'is_sid': boolean, 'pids':[PID, ...], 'sid':SID}, ...]
   '''
-  _L, t_0 = _getLogger()
-  _L.debug("Resolving %d identifiers", len(IDs))
-  results = []
 
-  def _fetch(url, an_id):
+  async def _fetch(an_id, session):
+    url = DEFAULT_SOLR
     params = {'wt': 'json',
               'fl': 'id,seriesId',
               }
     query = quoteTerm(an_id)
     params['q'] = 'id:' + query + ' OR seriesId:' + query
-    response = requests.get(url, params=params)
-    result = {'id': an_id,
-              'pids': [],
-              'sid': None,
-              'is_sid': False}
-    if response.status_code == requests.codes.ok:
-      data = json.loads(response.text)
-      pid_set = set()
-      sid_set = set()
-      for doc in data['response']['docs']:
+
+    async with session.get(url, params=params) as response:
+      response_text = await response.text()
+      result = {'id': an_id,
+                'pids': [],
+                'sid': None,
+                'is_sid': False}
+      if response.status == 200:
+        data = json.loads(response_text)
+        pid_set = set()
+        sid_set = set()
+        for doc in data['response']['docs']:
+          try:
+            sid_set.add(doc['seriesId'])
+          except KeyError as e:
+            pass
+          # must always be an id
+          pid_set.add(doc['id'])
+        if an_id in sid_set:
+          result['is_sid'] = True
+        if len(sid_set) > 1:
+          _L.error("Whoa, more than one SID found for an_id: %s", an_id)
+        result['pids'] = list(pid_set)
         try:
-          sid_set.add(doc['seriesId'])
+          result['sid'] = sid_set.pop()
         except KeyError as e:
           pass
-        # must always be an id
-        pid_set.add(doc['id'])
-      if an_id in sid_set:
-        result['is_sid'] = True
-      if len(sid_set) > 1:
-        _L.error("Whoa, more than one SID found for an_id: %s", an_id)
-      result['pids'] = list(pid_set)
-      try:
-        result['sid'] = sid_set.pop()
-      except KeyError as e:
-        pass
-        _L.debug("No sid for an_id: %s", an_id)
-    return result
+          _L.debug("No sid for an_id: %s", an_id)
+      return result
 
-  async def _work(pids):
-    with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as executor:
-      loop = None
-      try:
-        loop = asyncio.get_event_loop()
-      except RuntimeError as e:
-        _L.warning(str(e))
-        loop = asyncio.new_event_loop()
-      tasks = []
-      for an_id in pids:
-        tasks.append(loop.run_in_executor(executor, _fetch, DEFAULT_SOLR, an_id ))
-      for response in await asyncio.gather(*tasks):
-        results.append( response )
+  async def _work(loop, pids):
+    tasks = []
+    async with ClientSession(loop=loop) as session:
+      for pid in pids:
+        tasks.append( asyncio.ensure_future(_fetch(pid, session)) )
+      responses = await asyncio.gather(*tasks)
+      return responses
 
-  loop = None
-  try:
-    loop = asyncio.get_event_loop()
-  except RuntimeError as e:
-    _L.warning(str(e))
-    loop = asyncio.new_event_loop()
-  loop.run_until_complete( _work(IDs) )
+  _L, t_0 = _getLogger()
+  _L.debug("Resolving %d identifiers", len(IDs))
+  loop = asyncio.get_event_loop()
+  future = asyncio.ensure_future( _work(loop, IDs) )
+  results = loop.run_until_complete( future )
   _L.debug("elapsed:%fsec", time.time()-t_0)
   return results
 
@@ -203,10 +196,9 @@ def getObsolescenceChain(IDs, solr_url=None, max_depth=20):
   Returns: {ID: [pids], ...}
 
   '''
-  _L, t_0 = _getLogger()
-  results = {}
 
-  def _fetch(url, an_id):
+  def _fetch(an_id):
+    url = DEFAULT_SOLR
     session = requests.Session()
     params = {'wt':'json',
               'fl':'obsoletes',
@@ -220,8 +212,9 @@ def getObsolescenceChain(IDs, solr_url=None, max_depth=20):
       query = quoteTerm(obsoleted_pids[-1])
       params['q'] = "id:" + query + " OR seriesId:" + query
       response = session.get(url, params=params)
-      if response.status_code == requests.codes.ok:
-        data = json.loads(response.text)
+      response_text = response.text
+      if response.status_code == 200:
+        data = json.loads(response_text)
         if len(data['response']['docs']) > 1:
           _L.warning("More than a single obsoleted entry returned for pid: %s", obsoleted_pids[-1])
         try:
@@ -238,29 +231,22 @@ def getObsolescenceChain(IDs, solr_url=None, max_depth=20):
         more_work = False
     return obsoleted_pids
 
-  async def _work(pids):
+  async def _work(loop, pids):
+    results = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as executor:
-      loop = None
-      try:
-        loop = asyncio.get_event_loop()
-      except RuntimeError as e:
-        _L.warning(str(e))
-        loop = asyncio.new_event_loop()
+      loop = asyncio.get_event_loop()
       tasks = []
       for an_id in pids:
-        url = _defaults(solr_url) #call here as option for RR select
-        tasks.append(loop.run_in_executor(executor, _fetch, url, an_id ))
-      for response in await asyncio.gather(*tasks):
-        results[response[0]] = response[1:]
-        #results.append( response )
+        tasks.append( loop.run_in_executor( executor, _fetch, an_id ))
+    for response in await asyncio.gather( *tasks ):
+      results[response[0]] = response[1:]
+    return results
 
-  loop = None
-  try:
-    loop = asyncio.get_event_loop()
-  except RuntimeError as e:
-    _L.warning(str(e))
-    loop = asyncio.new_event_loop()
-  loop.run_until_complete( _work(IDs) )
+  _L, t_0 = _getLogger()
+  results = {}
+  loop = asyncio.get_event_loop()
+  future = asyncio.ensure_future( _work(loop, IDs) )
+  results = loop.run_until_complete( future )
   _L.debug("elapsed:%fsec", time.time()-t_0)
   return results
 
@@ -320,12 +306,7 @@ def getResolvePIDs(PIDs, solr_url=None):
 
   async def _work(pids):
     with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as executor:
-      loop = None
-      try:
-        loop = asyncio.get_event_loop()
-      except RuntimeError as e:
-        _L.warning(str(e))
-        loop = asyncio.new_event_loop()
+      loop = asyncio.get_event_loop()
       tasks = []
       for an_id in pids:
         url = _defaults(solr_url) #call here as option for RR select
@@ -333,13 +314,9 @@ def getResolvePIDs(PIDs, solr_url=None):
       for response in await asyncio.gather(*tasks):
         results[ response[0] ] = response
 
-  loop = None
-  try:
-    loop = asyncio.get_event_loop()
-  except RuntimeError as e:
-    _L.warning(str(e))
-    loop = asyncio.new_event_loop()
-  loop.run_until_complete( _work(PIDs) )
+  loop = asyncio.get_event_loop()
+  future = asyncio.ensure_future(_work(PIDs))
+  loop.run_until_complete( future )
   _L.debug("elapsed:%fsec", time.time()-t_0)
   return results
 
@@ -385,8 +362,8 @@ if __name__ == "__main__":
 
 
   #change verbosity of the urllib3.connectionpool logging
-  logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
+  #logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
   logging.basicConfig(level=logging.DEBUG)
-  #eg_pidsAndSid()
-  #eg_getObsolescenceChain()
+  eg_pidsAndSid()
+  eg_getObsolescenceChain()
   eg_getResolvePids()
