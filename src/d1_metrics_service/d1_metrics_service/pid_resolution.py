@@ -23,6 +23,7 @@ SOLR_RESERVED_CHAR_LIST = [
   '+', '-', '&', '|', '!', '(', ')', '{', '}', '[', ']', '^', '"', '~', '*', '?', ':'
   ]
 
+
 def _getLogger():
   '''
   Get a logger named with the callers method name and

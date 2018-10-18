@@ -64,7 +64,6 @@ class MetricsReader:
         self.logger.debug("exit on_get")
 
 
-
     def on_post(self, req, resp):
         """
         The method assigned to the post end point
