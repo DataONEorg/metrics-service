@@ -9,9 +9,6 @@ Implements a REST API for access to aggregated metrics for DataONE.
 Deployment
 ----------
 
-IMPORTANT: This application uses asyncio features of Python3.5+ and as a consequence, is
-not compatible with Apache mod_wsgi.
-
 
 The server stack is basically::
 
@@ -19,20 +16,15 @@ The server stack is basically::
                         |
                     https @ 443
                         |
-                   [apache2.4]
+             [apache2.4 + mod_wsgi]
                         |
-                   http @ 8010
-                        |
-                 [gunicorn @ 8010]
                [d1-metrics-service]
               /         |        \
         http @ 8200    5432   cn.dataone.org @443
             /           |          \
     [Elastic Search] [Postgres]   [Solr]
 
-Gunicorn and d1-metrics-service are deployed in a virtual environment using Python 3.5+.
-
-Gunicorn is managed using systemd.
+Python and d1-metrics-service are deployed in a virtual environment using Python 3.5+.
 
 
 The Virtual Environment
@@ -52,7 +44,7 @@ Deactivate the virtual environment::
   deactivate
 
 To install the metrics service and dependencies into the virtual environment, first activate
-the virtual environment, then:
+the virtual environment, then::
 
   cd /var/local/metrics-service-asyncio/metrics-service/src/
   pip install -U -e d1_metrics
@@ -65,6 +57,40 @@ it will be necessary to ``pip install -U d1_metrics_service`` in the activated e
 
 The Gunicorn server can be configured to `auto reload <http://docs.gunicorn.org/en/stable/settings.html>`_ after source
 changes, which can be convenient in a dynamic development environment.
+
+
+Apache mod_wsgi Configuration
+.............................
+
+``/etc/apache2/mods-enabled/wsgi.conf``::
+
+  WSGIPythonOptimize 1
+
+
+In the Apache site configuration::
+
+  WSGIPythonHome /var/local/metrics-service/src/d1_metrics_service/.venv
+  <VirtualHost *:443>
+  ...
+
+    Header always set Access-Control-Allow-Origin *
+    WSGIDaemonProcess d1_metrics_service processes=4 python-path=/var/local/metrics-service/src/d1_metrics_service/.venv/lib/python3.5/site-packages
+	WSGIProcessGroup d1_metrics_service
+	WSGIApplicationGroup %{GLOBAL}
+	WSGIScriptAlias / /var/local/metrics-service/src/d1_metrics_service/.venv/lib/python3.5/site-packages/d1_metrics_service/wsgi.py
+
+  	<Location /metrics>
+		AuthType None
+		Require all granted
+		# Always set these headers.
+        #Header always set Access-Control-Allow-Origin *
+        Header always set Access-Control-Allow-Methods "POST, GET, OPTIONS, DELETE, PUT"
+        Header always set Access-Control-Max-Age "1000"
+        Header always set Access-Control-Allow-Headers "x-requested-with, Content-Type, origin, authorization, accept, client-security-token"
+    </Location>
+    ...
+  </VirtualHost>
+
 
 
 Gunicorn Systemd Configuration
@@ -105,6 +131,7 @@ Enable the service at boot::
 
 Verify the service is running::
 
+  sudo systemctl status d1-metrics-service
   ● d1-metrics-service.service - Gunicorn instance serving d1-metrics-service
      Loaded: loaded (/etc/systemd/system/d1-metrics-service.service; enabled; vendor preset: enabled)
      Active: active (running) since Thu 2018-10-18 05:48:10 PDT; 6s ago

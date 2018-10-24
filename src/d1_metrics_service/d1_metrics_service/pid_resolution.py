@@ -26,8 +26,8 @@ SOLR_RESERVED_CHAR_LIST = [
 
 def _getLogger():
   '''
-  Get a logger named with the callers method name and
-  include a timestamp for when the logger is created.
+  Return a logger and a timestamp to help with profiling.
+
   Returns: instance of logging.logger, timestamp
   '''
   logger = logging.getLogger()
@@ -73,8 +73,16 @@ def _defaults(solr_url):
   return solr_url
 
 
-def getIdsFromSolrResponse(response_text, pids=[]):
+def _getIdsFromSolrResponse(response_text, pids=[]):
+  '''
+  Helper to retrieve identifiers from the solr response
 
+  Args:
+    response_text: The solr response json text.
+    pids: A list of identifiers to which identifiers here are added
+
+  Returns: pids with any additional identifiers appended.
+  '''
   data = json.loads(response_text)
   for doc in data['response']['docs']:
     try:
@@ -298,7 +306,7 @@ def getResolvePIDs(PIDs, solr_url=None):
     response = session.get(url, params=params)
     if response.status_code == requests.codes.ok:
       #continue
-      result = getIdsFromSolrResponse(response.text, result)
+      result = _getIdsFromSolrResponse(response.text, result)
       more_work = True
       params['fl'] = 'id,documents,obsoletes,resourceMap'
       while more_work:
@@ -307,7 +315,7 @@ def getResolvePIDs(PIDs, solr_url=None):
         params['q'] = 'resourceMap:(' + query + ')'
         response = session.get(url, params=params)
         if response.status_code == requests.codes.ok:
-          result = getIdsFromSolrResponse(response.text, result)
+          result = _getIdsFromSolrResponse(response.text, result)
           if len(result) == current_length:
             more_work = False
         else:
