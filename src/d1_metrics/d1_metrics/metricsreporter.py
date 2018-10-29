@@ -16,6 +16,8 @@ from datetime import timedelta
 from urllib.parse import quote_plus
 from d1_metrics.metricselasticsearch import MetricsElasticSearch
 from collections import Counter
+from dateutil.relativedelta import relativedelta
+import logging
 
 DEFAULT_REPORT_CONFIGURATION={
     "report_url" : "https://api.datacite.org/reports",
@@ -31,27 +33,47 @@ class MetricsReporter(object):
 
     def __init__(self):
         self._config = DEFAULT_REPORT_CONFIGURATION
+        self.logger = logging.getLogger('metrics_reporting_service.' + __name__)
+        self.logger.setLevel(logging.DEBUG)
+
+        # create file handler which logs even debug messages
+        fh = logging.FileHandler('./reports/reports.log')
+        fh.setLevel(logging.DEBUG)
+
+        # create console handler with a higher log level
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.ERROR)
+
+        # create formatter and add it to the handlers
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        fh.setFormatter(formatter)
+        ch.setFormatter(formatter)
+
+        # add the handlers to the logger
+        self.logger.addHandler(fh)
+        self.logger.addHandler(ch)
 
 
-    def report_handler(self, start_date, end_date):
+    def report_handler(self, start_date, end_date, node, unique_pids):
         """
         Creates a Report JSON object, dumps it to a file and sends the report to the Hub.
         This is a handler function that manages the entire work flow
         :param start_date:
         :param end_date:
+        :param: node
+        :param: unique_pids
         :return: None
         """
         json_object = {}
-        json_object["id"] = "DSR-D1-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
-        json_object["report-header"] = self.get_report_header(start_date, end_date)
-        json_object["report-datasets"] = self.get_report_datasets(start_date, end_date)
-        with open('./reports/' + ("DSR-D1-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d'))+'.json', 'w') as outfile:
+        json_object["report-header"] = self.get_report_header(start_date, end_date, node)
+        json_object["report-datasets"] = self.get_report_datasets(start_date, end_date, unique_pids, node)
+        with open('./reports/' + ("DSR-D1-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d'))+ "-" + node+'.json', 'w') as outfile:
             json.dump(json_object, outfile, indent=2,ensure_ascii=False)
-        response = self.send_reports(start_date, end_date)
+        response = self.send_reports(start_date, end_date, node)
         return response
 
 
-    def get_report_header(self, start_date, end_date):
+    def get_report_header(self, start_date, end_date, node):
         """
         Generates a unique report header
         :param start_date:
@@ -67,18 +89,19 @@ class MetricsReporter(object):
         report_header["reporting-period"]["end-date"] = (datetime.strptime(end_date, '%m/%d/%Y')).strftime(
             '%Y-%m-%d')
         report_header["created"] = datetime.now().strftime('%Y-%m-%d')
-        report_header["created-by"] = self._config["created_by"]
+        report_header["created-by"] = self.resolve_MN(node)
         report_header["report-filters"] = []
         report_header["report-attributes"] = []
 
         return (report_header)
 
 
-    def get_unique_pids(self, start_date, end_date):
+    def get_unique_pids(self, start_date, end_date, node, doi=False):
         """
         Queries ES for the given time period and returns the set of pids
         :param start_date:
         :param end_date:
+        :param: node
         :return: SET object of pids for a given time range. (Always unique - because it is a set!)
         """
         metrics_elastic_search = MetricsElasticSearch()
@@ -94,7 +117,11 @@ class MetricsReporter(object):
                 }
             },
             {
+
                 "term": {"event.key": "read"}
+            },
+            {
+                "term": {"nodeId": node}
             },
             {
                 "exists": {
@@ -102,6 +129,13 @@ class MetricsReporter(object):
                 }
             }
         ]
+
+        # Just search for DOI string in to send it to the HUB
+        if(doi):
+            DOIWildcard = {}
+            DOIWildcard["wildcard"] = {"pid.key": "*doi*"}
+            query.append(DOIWildcard)
+
         fields = "pid"
         results, total = metrics_elastic_search.getSearches(limit=1000000, q = query, date_start=datetime.strptime(start_date,'%m/%d/%Y')\
                                                      , date_end=datetime.strptime(end_date,'%m/%d/%Y'), fields=fields)
@@ -287,11 +321,13 @@ class MetricsReporter(object):
 
 
 
-    def get_report_datasets(self, start_date, end_date ):
+    def get_report_datasets(self, start_date, end_date, unique_pids, node ):
         """
 
         :param start_date:
         :param end_date:
+        :param: unique_pids
+        :param: node
         :return:
         """
         metrics_elastic_search = MetricsElasticSearch()
@@ -299,12 +335,14 @@ class MetricsReporter(object):
         report_datasets = []
         pid_list = []
 
-        unique_pids = self.get_unique_pids(start_date, end_date)
+
         count = 0
+        nodeName = self.resolve_MN(node)
+        self.logger.debug("Processing " + str(len(unique_pids)) + " datasets for node " + node)
         for pid in unique_pids:
             count = count + 1
             if((count % 100 == 0) or (count == 1) or (count == len(unique_pids))) :
-                print(count, " of " , len(unique_pids))
+                self.logger.debug(str(count) + " of "  + str(len(unique_pids)))
 
 
             dataset = {}
@@ -313,13 +351,21 @@ class MetricsReporter(object):
 
                 if ("title" in (i for i in solr_response["response"]["docs"][0])):
                     dataset["dataset-title"] = solr_response["response"]["docs"][0]["title"]
+                else:
+                    dataset["dataset-title"] = ""
 
                 if ("authoritativeMN" in (i for i in solr_response["response"]["docs"][0])):
                     dataset["publisher"] = self.resolve_MN(solr_response["response"]["docs"][0]["authoritativeMN"])
+                else:
+                    dataset["publisher"].append(
+                        {"type": "urn", "value": nodeName})
 
                 if ("authoritativeMN" in (i for i in solr_response["response"]["docs"][0])):
                     dataset["publisher-id"] = []
-                    dataset["publisher-id"].append({"type":"grid", "value" :solr_response["response"]["docs"][0]["authoritativeMN"]})
+                    dataset["publisher-id"].append({"type":"urn", "value" :solr_response["response"]["docs"][0]["authoritativeMN"]})
+                else:
+                    dataset["publisher-id"].append(
+                        {"type": "urn", "value": node})
 
                 dataset["platform"] = "DataONE"
 
@@ -391,8 +437,6 @@ class MetricsReporter(object):
                 performance["instance"] = instance
 
                 dataset["performance"].append(performance)
-
-
 
             else:
                 continue
@@ -470,7 +514,7 @@ class MetricsReporter(object):
         return PIDs
 
 
-    def send_reports(self,  start_date, end_date):
+    def send_reports(self,  start_date, end_date, node):
         """
         Sends report to the Hub at the specified Hub report url in the config parameters
         :return: Nothing
@@ -478,7 +522,7 @@ class MetricsReporter(object):
         s = requests.session()
         s.headers.update(
             {'Authorization': "Bearer " +  self._config["auth_token"], 'Content-Type': 'application/json', 'Accept': 'application/json'})
-        with open("./reports/DSR-D1-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')+'.json', 'r') as content_file:
+        with open("./reports/DSR-D1-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')+ "-" + node+'.json', 'r') as content_file:
             content = content_file.read()
         response = s.post(self._config["report_url"], data=content.encode("utf-8"))
 
@@ -504,48 +548,64 @@ class MetricsReporter(object):
         Probably would be called only once in its lifetime
         :return: None
         """
-        date = datetime(2012, 7, 5)
-        stopDate = datetime(2012, 12, 31)
+        mn_list = self.get_MN_List()
+        for node in mn_list:
+            date = datetime(2012, 7, 1)
+            stopDate = datetime(2012, 12, 1)
 
-        count = 0
-        while (date.strftime('%Y-%m-%d') != stopDate.strftime('%Y-%m-%d')):
-            print(date.strftime('%Y-%m-%d'))
-            print(stopDate.strftime('%Y-%m-%d'))
-            count  = count + 1
+            count = 0
+            while (date.strftime('%Y-%m-%d') != stopDate.strftime('%Y-%m-%d')):
+                self.logger.debug("Running job for Node: " + node)
 
-            prevDate = date
-            date += timedelta(days=1)
+                count = count + 1
 
-            print("Job ", count, " : ", prevDate.strftime('%m/%d/%Y'), " to ", date.strftime('%m/%d/%Y'))
+                prevDate = date
+                date += relativedelta(months=1)
 
-            # Uncomment me to send reports to the HUB!
-            response = self.report_handler(prevDate.strftime('%m/%d/%Y'), date.strftime('%m/%d/%Y'))
+                start_date, end_date = prevDate.strftime('%m/%d/%Y'),\
+                             date.strftime('%m/%d/%Y')
 
 
-            with open('./reports/reports.log', 'a') as logfile:
-                logentry = "Job "+ str(count) + " : " + prevDate.strftime('%m/%d/%Y') + " to " + date.strftime('%m/%d/%Y') + " === " + str(response.status_code)
-                logfile.write(logentry)
-                logfile.write("\n")
+                unique_pids = self.get_unique_pids(start_date, end_date, node, doi=True)
 
-            print("Job ", count, " : ", prevDate, " to ", date)
+                if len(unique_pids) > 0:
+                    self.logger.debug("Job " + " : " + start_date + " to " + end_date)
 
-            if response.status_code != 201:
-                with open('./reports/reports_errors.log', 'a') as errorfile:
-                    logentry = "Job " + str(count) + " : " + prevDate.strftime('%m/%d/%Y') + " to " + date.strftime(
-                        '%m/%d/%Y') + " === " + str(response.status_code)
-                    errorfile.write("\n")
-                    errorfile.write(datetime.now().strftime("%I:%M%p on %B %d, %Y"))
-                    errorfile.write("\n")
-                    errorfile.write(logentry)
-                    errorfile.write("\n")
-                    errorfile.write(str(response.status_code) + " " + response.reason)
-                    errorfile.write("\n")
-                    errorfile.write("Headers: ")
-                    errorfile.write(str(response.headers))
-                    errorfile.write("\n")
-                    errorfile.write("Content: ")
-                    errorfile.write(str(response.content))
-                    errorfile.write("\n")
+                    # Uncomment me to send reports to the HUB!
+                    response = self.report_handler(start_date, end_date, node, unique_pids)
+
+
+                    logentry = "Node " + node + " : " + start_date + " to " + end_date + " === " + str(response.status_code)
+
+                    self.logger.debug(logentry)
+
+                    if response.status_code != 201:
+
+                        logentry = "Node " + node + " : " + start_date + " to " + end_date + " === " \
+                                   + str(response.status_code)
+                        self.logger.error(logentry)
+                        self.logger.error(str(response.status_code) + " " + response.reason)
+                        self.logger.error("Headers: " + str(response.headers))
+                        self.logger.error("Content: " + response.content)
+
+
+    def get_MN_List(self):
+        """
+        Retreives a MN idenifier from the https://cn.dataone.org/cn/v2/node/ endpoint
+        Used to send the reports for different MNs
+        :return: Set of Member Node identifiers
+        """
+        node_url = "https://cn.dataone.org/cn/v2/node/"
+        resp = requests.get(node_url, stream=True)
+        root = ElementTree.fromstring(resp.content)
+        mn_list = set()
+        for child in root:
+            node_type = child.attrib['type']
+            identifier = child.find('identifier')
+            if (node_type == "mn"):
+                mn_list.add(identifier.text)
+        return(mn_list)
+
 
 
 
