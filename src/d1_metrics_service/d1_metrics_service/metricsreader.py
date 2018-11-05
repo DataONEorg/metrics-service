@@ -17,7 +17,7 @@ from datetime import datetime
 import logging
 import time
 
-from . import pid_resolution
+from d1_metrics_service import pid_resolution
 
 DEFAULT_REPORT_CONFIGURATION={
     "solr_query_url": "https://cn.dataone.org/cn/v2/query/solr/?"
@@ -141,19 +141,7 @@ class MetricsReader:
         t_delta = time.time() - t_start
         self.logger.debug('getSummaryMetricsPerDataset:t1=%.4f', t_delta)
 
-        # Getting Obsoletes dictionary
-        #manager = multiprocessing.Manager()
-        #obsoletes_dict = manager.dict()
-
         obsoletes_dict = pid_resolution.getObsolescenceChain( PIDs, max_depth=1 )
-        #with multiprocessing.Pool() as pool:
-        #    for pid in PIDs:
-        #      results[pid] = pool.apply_async(self.resolveDataPackagePID, obsoletes_dict, pid)
-        #    pool.close()
-        #    pool.join()
-        #for pid in PIDs:
-        #    self.logger.debug("getSummaryMetricsPerDataset #004.5 pid=%s", pid)
-        #    self.resolveDataPackagePID(obsoletes_dict, pid)
 
         t_delta = time.time() - t_start
         self.logger.debug('getSummaryMetricsPerDataset:t2=%.4f', t_delta)
@@ -184,11 +172,6 @@ class MetricsReader:
             },
             {
                 "exists": {
-                    "field": "geoip.country_code2.keyword"
-                }
-            },
-            {
-                "exists": {
                     "field": "sessionId"
                 }
             },
@@ -209,7 +192,8 @@ class MetricsReader:
                         {
                             "country": {
                                 "terms": {
-                                    "field": "geoip.country_code2.keyword"
+                                    "field": "geoip.country_code2.keyword",
+                                    "missing_bucket": "true"
                                 }
                             }
                         },
@@ -239,7 +223,7 @@ class MetricsReader:
                 "aggs": aggregatedPIDs
             }
         }
-        pid = self.response["metricsRequest"]["filterBy"][0]["values"]
+        # pid = self.response["metricsRequest"]["filterBy"][0]["values"]
         self.response["metricsRequest"]["filterBy"][0]["values"] = PIDs
         self.request["filterBy"][0]["values"] = self.response["metricsRequest"]["filterBy"][0]["values"]
 
@@ -417,8 +401,7 @@ class MetricsReader:
             PIDs = self.parseResponse(resp, PIDs)
 
         callSolr = True
-        # print(PIDs)
-        # print(type(PIDs))
+
         while (callSolr):
 
             # Querying for all the PIDs that we got from the previous iteration
@@ -536,7 +519,6 @@ class MetricsReader:
         self.logger.debug("enter getSummaryMetricsPerCatalog")
         catalogPIDs = {}
         combinedPIDs = []
-        masterProcess = []
         for i in requestPIDArray:
             if i not in catalogPIDs:
                 catalogPIDs[i] = []
@@ -558,9 +540,6 @@ class MetricsReader:
         #    self.logger.debug("getSummaryMetricsPerCatalog #004.5 pid=%s", pid)
         #    self.resolveCatalogPID(return_dict, a_type, pid, req_session=req_session)
         self.logger.debug("getSummaryMetricsPerCatalog #005: %s", str(return_dict))
-
-        for subProcess in masterProcess:
-            subProcess.join()
 
         for i in catalogPIDs:
             catalogPIDs[i] = return_dict[i]
