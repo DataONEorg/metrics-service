@@ -13,7 +13,8 @@ from urllib.parse import quote_plus
 import requests
 from d1_metrics.metricselasticsearch import MetricsElasticSearch
 from d1_metrics.metricsdatabase import MetricsDatabase
-from datetime import datetime
+from datetime import datetime, timedelta
+from collections import OrderedDict
 import logging
 import time
 
@@ -119,6 +120,9 @@ class MetricsReader:
                 if n_filter_values > 1:
                     #Called when browsing the search UI for example
                     results, resultDetails = self.getSummaryMetricsPerCatalog(filter_by[0]["values"], filter_type)
+
+            if (filter_type == "repository") and interpret_as == "list":
+                results, resultDetails = self.getMetricsPerRepository(filter_by[0]["values"][0])
 
         self.response["results"] = results
         self.response["resultDetails"] = resultDetails
@@ -796,6 +800,142 @@ class MetricsReader:
             resultDict[i]["downloadCount"] = downloadCount
 
         return resultDict
+
+
+
+    def getMetricsPerRepository(self, nodeId):
+        """
+        Retrieves the metrics stats per repository
+        Uses NodeID as repository ID
+        :param: NodeId: Repository identifier to look up the metrics in the ES
+        :return:
+            Formatted Metrics Resonse object in JSON format
+        """
+
+        # Basic init for required objects
+        t_start = time.time()
+        metrics_elastic_search = MetricsElasticSearch()
+        metrics_elastic_search.connect()
+
+        t_delta = time.time() - t_start
+        self.logger.debug('getMetricsPerRepository:t1=%.4f', t_delta)
+
+        # defining the ES search and aggregation body for Repository profile
+        search_body = [
+            {
+                "term": {"event.key": "read"}
+            },
+            {
+                "term": {
+                    "nodeId": nodeId
+                }
+
+            },
+            {
+                "exists": {
+                    "field": "sessionId"
+                }
+            },
+            {
+                "terms": {
+                    "formatType": [
+                        "DATA",
+                        "METADATA"
+                    ]
+                }
+            }
+        ]
+
+        aggregation_body = {
+            "pid_list": {
+                "composite": {
+                    "size": 100,
+                    "sources": [
+                        {
+                            "format": {
+                                "terms": {
+                                    "field": "formatType"
+                                }
+                            }
+                        },
+                        {
+                            "month": {
+                                "date_histogram": {
+                                    "field": "dateLogged",
+                                    "interval": "month"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+
+        # we have events in ES from July 2012
+        # TODO : Set this to the initial repository onboarding date
+        # i.e. the first dataset submission date for that repository
+        start_date = "07/01/2012"
+        end_date = datetime.today().strftime('%m/%d/%Y')
+
+        # Query the ES with the designed Search and Aggregation body
+        # uses the start_date and the end_date for the time range of data retrieval
+        data = metrics_elastic_search.iterate_composite_aggregations(search_query=search_body,
+                                                                     aggregation_query=aggregation_body,
+                                                                     start_date=datetime.strptime(start_date,
+                                                                                                  '%m/%d/%Y'),
+                                                                     end_date=datetime.strptime(end_date, '%m/%d/%Y'))
+
+        t_delta = time.time() - t_start
+        self.logger.debug('getMetricsPerRepository:t3=%.4f', t_delta)
+        return (self.formatMetricsPerRepository(data, nodeId, start_date, end_date))
+
+
+
+    def formatMetricsPerRepository(self, data, nodeId, start_date, end_date):
+        """
+        Formats the ES response to the Metrics Service response
+        Documented at https://app.swaggerhub.com/apis/nenuji/data-metrics/1.0.0.3
+        :param: data - Dictionary object retreieved as a response from ES
+        :param: nodeId - Identifier fo the repository
+        :param: start_date
+        :param: end_date
+        :return:
+            results - Dictionary object for Metrics Response
+            resultDetails - Dictionary object for additional information about the  Metrics Response
+        """
+        results = {
+            "months": [],
+            "downloads": [],
+            "views": [],
+            "citations": [],
+        }
+
+        # Getting the months between the two given dates:
+        start = datetime.strptime(start_date, "%m/%d/%Y")
+        end = datetime.strptime(end_date, "%m/%d/%Y")
+
+        # Getting a list of all the months possible for the repo
+        # And initializing the corresponding metrics array
+        results["months"] = list(OrderedDict(((start + timedelta(_)).strftime('%Y-%m'), None) for _ in range((end - start).days)).keys())
+        results["downloads"] = [0]*len(results["months"])
+        results["views"] = [0]*len(results["months"])
+        results["citations"] = [0]*len(results["months"])
+
+        resultDetails = {}
+        resultDetails["citations"] = []
+
+        # Formatting the response from ES
+        for i in data["aggregations"]["pid_list"]["buckets"]:
+            months = datetime.utcfromtimestamp((i["key"]["month"] // 1000)).strftime(('%Y-%m'))
+            month_index = results["months"].index(months)
+            if i["key"]["format"] == "DATA":
+                results["downloads"][month_index] += i["doc_count"]
+            elif i["key"]["format"] == "METADATA":
+                results["views"][month_index] += i["doc_count"]
+            else:
+                pass
+
+        return results, resultDetails
 
 
 
