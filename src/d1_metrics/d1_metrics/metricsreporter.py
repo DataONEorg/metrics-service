@@ -89,7 +89,7 @@ class MetricsReporter(object):
         report_header["reporting-period"]["end-date"] = (datetime.strptime(end_date, '%m/%d/%Y')).strftime(
             '%Y-%m-%d')
         report_header["created"] = datetime.now().strftime('%Y-%m-%d')
-        report_header["created-by"] = self.resolve_MN(node)
+        report_header["created-by"] = node
         report_header["report-filters"] = []
         report_header["report-attributes"] = []
 
@@ -550,8 +550,8 @@ class MetricsReporter(object):
         """
         mn_list = self.get_MN_List()
         for node in mn_list:
-            date = datetime(2012, 7, 1)
-            stopDate = datetime(2012, 12, 1)
+            date = datetime(2013, 1, 1)
+            stopDate = datetime(2013, 12, 31)
 
             count = 0
             while (date.strftime('%Y-%m-%d') != stopDate.strftime('%Y-%m-%d')):
@@ -559,16 +559,18 @@ class MetricsReporter(object):
 
                 count = count + 1
 
-                prevDate = date
-                date += relativedelta(months=1)
+                prevDate = date + timedelta(days=1)
+                date = self.last_day_of_month(prevDate)
 
                 start_date, end_date = prevDate.strftime('%m/%d/%Y'),\
                              date.strftime('%m/%d/%Y')
 
 
+
+
                 unique_pids = self.get_unique_pids(start_date, end_date, node, doi=True)
 
-                if len(unique_pids) > 0:
+                if (len(unique_pids) > 0 and len(unique_pids) < 5000):
                     self.logger.debug("Job " + " : " + start_date + " to " + end_date)
 
                     # Uncomment me to send reports to the HUB!
@@ -586,7 +588,17 @@ class MetricsReporter(object):
                         self.logger.error(logentry)
                         self.logger.error(str(response.status_code) + " " + response.reason)
                         self.logger.error("Headers: " + str(response.headers))
-                        self.logger.error("Content: " + response.content)
+                        self.logger.error("Content: " + str((response.content).decode("utf-8")))
+                elif (len(unique_pids) > 5000):
+                    self.logger.debug("Skipping job for " + node  + " " + start_date + " to " + end_date + " - length of PIDS : " + str(len(unique_pids)))
+                else:
+                    pass
+
+    def last_day_of_month(self, date):
+        if date.month == 12:
+            return date.replace(day=31)
+        return date.replace(month=date.month + 1, day=1) - timedelta(days=1)
+
 
 
     def get_MN_List(self):
