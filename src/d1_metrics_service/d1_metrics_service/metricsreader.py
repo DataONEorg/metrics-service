@@ -921,8 +921,18 @@ class MetricsReader:
         results["views"] = [0]*len(results["months"])
         results["citations"] = [0]*len(results["months"])
 
+        #Gathering Citations
         resultDetails = {}
         resultDetails["citations"] = []
+        citationDict = {}
+        citation_pids = self.getRepositoryCitationPIDs(nodeId)
+        totalCitations, resultDetails["citations"] = self.gatherCitations(citation_pids)
+
+        for citationObject in resultDetails["citations"]:
+            if(citationObject["link_publication_date"][:7] in citationDict):
+                citationDict[citationObject["link_publication_date"][:7]] = citationDict[citationObject["link_publication_date"][:7]] + 1
+            else:
+                citationDict[citationObject["link_publication_date"][:7]] = 1
 
         # Formatting the response from ES
         for i in data["aggregations"]["pid_list"]["buckets"]:
@@ -935,9 +945,52 @@ class MetricsReader:
             else:
                 pass
 
+        for months in citationDict:
+            if months in results["months"]:
+                month_index = results["months"].index(months)
+                results["citations"][month_index] = citationDict[months]
+            else:
+                results["months"].append(months)
+                results["views"].append(0)
+                results["downloads"].append(0)
+                results["citations"][month_index] = citationDict[months]
+
+
         return results, resultDetails
+
+
+
+    def getRepositoryCitationPIDs(self, nodeId):
+        """
+
+        :param nodeId:
+        :return:
+        """
+        t_0 = time.time()
+        self.logger.debug("enter getRepositoryCitationPIDs")
+        metrics_database = MetricsDatabase()
+        metrics_database.connect()
+        csr = metrics_database.getCursor()
+        sql = 'SELECT target_id FROM citation_metadata WHERE \''+ nodeId +'\' = ANY (node_id);'
+
+        results = []
+        citationCount = 0
+        try:
+            csr.execute(sql)
+            rows = csr.fetchall()
+            for i in rows:
+                results.append(i[0])
+        except Exception as e:
+            print('Database error!\n{0}', e)
+        finally:
+            pass
+        self.logger.debug("exit getRepositoryCitationPIDs, elapsed=%fsec", time.time() - t_0)
+        return(results)
+
 
 
 
 if __name__ == "__main__":
     mr = MetricsReader()
+    # mr.getRepositoryCitationPIDs('urn:node:ARCTIC')
+    mr.resolvePIDs(["doi:10.5065/D6BG2KW9"])
