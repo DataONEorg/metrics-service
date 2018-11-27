@@ -390,6 +390,7 @@ class MetricsReader:
             req_session = requests.Session()
 
         PIDstring = PIDs[0]
+        resourceMaps = []
 
         # get the ids for all the previous versions and their data / metadata object till the current `pid` version
         # p.s. this might not be the latest version!
@@ -397,37 +398,54 @@ class MetricsReader:
         # fl = "documents, obsoletes, resourceMap"
         # q = "{!join from=resourceMap to=resourceMap}"
 
-        queryString = 'q={!join from=resourceMap to=resourceMap}id:"' + PIDstring + '"&fl=id&wt=json'
+        queryString = 'q=((id:"' + PIDstring + '") OR (seriesId: "' + PIDstring +'"))&fl=resourceMap&wt=json'
 
         resp = req_session.get(url=self._config["solr_query_url"], params=queryString)
 
         if (resp.status_code == 200):
-            PIDs = self.parseResponse(resp, PIDs)
+            resourceMaps = self.parseResponse(resp, resourceMaps)
 
         callSolr = True
+
+        # Get the obsolecence chain of the resourceMaps
 
         while (callSolr):
 
             # Querying for all the PIDs that we got from the previous iteration
             # Would be a single PID if this is the first iteration.
-            identifier = '(("' + '") OR ("'.join(PIDs) + '"))'
+            resourceMapString = '(("' + '") OR ("'.join(resourceMaps) + '"))'
 
             # Forming the query dictionary to be sent as a file to the Solr endpoint via the HTTP Post request.
             queryDict = {}
-            queryDict["fq"] = (None, 'id:* AND resourceMap:' + identifier)
-            queryDict["fl"] = (None, 'id,documents,obsoletes,resourceMap')
+            queryDict["fq"] = (None, 'id:' + resourceMapString)
+            queryDict["fl"] = (None, 'obsoletes')
             queryDict["wt"] = (None, "json")
 
             # Getting length of the array from previous iteration to control the loop
-            prevLength = len(PIDs)
+            prevLength = len(resourceMaps)
 
             resp = req_session.post(url=self._config["solr_query_url"], files=queryDict)
 
             if (resp.status_code == 200):
-                PIDs = self.parseResponse(resp, PIDs)
+                resourceMaps = self.parseResponse(resp, resourceMaps)
 
-            if (prevLength == len(PIDs)):
+            if (prevLength == len(resourceMaps)):
                 callSolr = False
+
+        # Get documents of all the resource maps
+
+        resourceMapIdentifier = '(("' + '") OR ("'.join(resourceMaps) + '"))'
+        queryDict = {}
+        queryDict["fq"] = (None, 'resourceMap:' + resourceMapIdentifier)
+        queryDict["fl"] = (None, 'id')
+        queryDict["wt"] = (None, "json")
+
+        resp = req_session.post(url=self._config["solr_query_url"], files=queryDict)
+
+        if (resp.status_code == 200):
+            PIDs = self.parseResponse(resp, PIDs)
+
+        PIDs.extend(resourceMaps)
 
         logger.debug("resolvePIDs response = %s", json.dumps(PIDs))
         logger.debug("exit resolvePIDs")
