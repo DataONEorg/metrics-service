@@ -21,8 +21,13 @@ import time
 from d1_metrics_service import pid_resolution
 
 DEFAULT_REPORT_CONFIGURATION={
-    "solr_query_url": "https://cn.dataone.org/cn/v2/query/solr/?"
+    "solr_query_url": "https://cn.dataone.org/cn/v2/query/solr/"
 }
+
+# List of characters that should be escaped in solr query terms
+SOLR_RESERVED_CHAR_LIST = [
+  '+', '-', '&', '|', '!', '(', ')', '{', '}', '[', ']', '^', '"', '~', '*', '?', ':'
+  ]
 
 class MetricsReader:
     """
@@ -142,6 +147,8 @@ class MetricsReader:
         metrics_elastic_search = MetricsElasticSearch()
         metrics_elastic_search.connect()
         PIDs = self.resolvePIDs(PIDs)
+        # PIDsDict = pid_resolution.getResolvePIDs(PIDs)
+        # PIDs = PIDsDict[PIDs[0]]
         t_delta = time.time() - t_start
         self.logger.debug('getSummaryMetricsPerDataset:t1=%.4f', t_delta)
 
@@ -386,11 +393,8 @@ class MetricsReader:
         """
         logger = logging.getLogger('resolvePIDs')
         logger.debug("enter resolvePIDs")
-        if req_session is None:
-            req_session = requests.Session()
 
         PIDstring = PIDs[0]
-        resourceMaps = []
 
         # get the ids for all the previous versions and their data / metadata object till the current `pid` version
         # p.s. this might not be the latest version!
@@ -398,58 +402,37 @@ class MetricsReader:
         # fl = "documents, obsoletes, resourceMap"
         # q = "{!join from=resourceMap to=resourceMap}"
 
-        queryString = 'q=((id:"' + PIDstring + '") OR (seriesId: "' + PIDstring +'"))&fl=resourceMap&wt=json'
+        session = requests.Session()
+        result = []
+        #always return at least this identifier
+        result.append(PIDstring)
+        params = {'wt':'json',
+                  'fl':'id,resourceMap'
+                  }
+        params['q'] = "((id:" + self.quoteTerm(PIDstring) + ") OR (seriesId:" + self.quoteTerm(PIDstring) + "))"
+        response = session.get(self._config["solr_query_url"], params=params)
+        if response.status_code == requests.codes.ok:
+          #continue
+          result = self.parseResponse(response, result)
+          more_work = True
+          params['fl'] = 'documents,obsoletes'
+          while more_work:
+            current_length = len(result)
+            query = ") OR (".join( map(self.quoteTerm, result) )
+            params['q'] = 'id:(' + query + ')'
+            response = session.get(self._config["solr_query_url"], params=params)
+            if response.status_code == requests.codes.ok:
 
-        resp = req_session.get(url=self._config["solr_query_url"], params=queryString)
+              result = self.parseResponse(response, result)
+              if len(result) == current_length:
+                more_work = False
+            else:
+              more_work = False
 
-        if (resp.status_code == 200):
-            resourceMaps = self.parseResponse(resp, resourceMaps)
 
-        callSolr = True
-
-        # Get the obsolecence chain of the resourceMaps
-
-        while (callSolr):
-
-            # Querying for all the PIDs that we got from the previous iteration
-            # Would be a single PID if this is the first iteration.
-            resourceMapString = '(("' + '") OR ("'.join(resourceMaps) + '"))'
-
-            # Forming the query dictionary to be sent as a file to the Solr endpoint via the HTTP Post request.
-            queryDict = {}
-            queryDict["fq"] = (None, 'id:' + resourceMapString)
-            queryDict["fl"] = (None, 'obsoletes')
-            queryDict["wt"] = (None, "json")
-
-            # Getting length of the array from previous iteration to control the loop
-            prevLength = len(resourceMaps)
-
-            resp = req_session.post(url=self._config["solr_query_url"], files=queryDict)
-
-            if (resp.status_code == 200):
-                resourceMaps = self.parseResponse(resp, resourceMaps)
-
-            if (prevLength == len(resourceMaps)):
-                callSolr = False
-
-        # Get documents of all the resource maps
-
-        resourceMapIdentifier = '(("' + '") OR ("'.join(resourceMaps) + '"))'
-        queryDict = {}
-        queryDict["fq"] = (None, 'resourceMap:' + resourceMapIdentifier)
-        queryDict["fl"] = (None, 'id')
-        queryDict["wt"] = (None, "json")
-
-        resp = req_session.post(url=self._config["solr_query_url"], files=queryDict)
-
-        if (resp.status_code == 200):
-            PIDs = self.parseResponse(resp, PIDs)
-
-        PIDs.extend(resourceMaps)
-
-        logger.debug("resolvePIDs response = %s", json.dumps(PIDs))
+        logger.debug("resolvePIDs response = %s", json.dumps(result))
         logger.debug("exit resolvePIDs")
-        return PIDs
+        return result
 
 
 
@@ -602,11 +585,6 @@ class MetricsReader:
                 }
             },
             {
-                "exists": {
-                    "field": "geoip.country_code2.keyword"
-                }
-            },
-            {
                 "terms": {
                     "formatType": [
                         "DATA",
@@ -618,7 +596,6 @@ class MetricsReader:
         aggregation_body = {
             "pid_list": {
               "composite": {
-                "size": 100,
                 "sources": [
                   {
                     "format": {
@@ -633,7 +610,7 @@ class MetricsReader:
             }
         }
 
-        start_date = "01/01/2000"
+        start_date = "01/01/2012"
         end_date = datetime.today().strftime('%m/%d/%Y')
 
         data = metrics_elastic_search.iterate_composite_aggregations(search_query=search_body,
@@ -643,7 +620,7 @@ class MetricsReader:
                                                                      end_date=datetime.strptime(end_date, '%m/%d/%Y'))
 
         # return {}, {}
-        # return data, {}
+        # return data, return_dict
         self.logger.debug("exit getSummaryMetricsPerCatalog, duration=%fsec", time.time()-t_0)
         return (self.formatDataPerCatalog(data, catalogPIDs))
 
@@ -690,94 +667,6 @@ class MetricsReader:
             results["datasets"].append(i)
 
         return  results, {}
-
-
-
-    def resolveCatalogPID(self, return_dict, filter_type, PID, req_session=None):
-        '''
-        Given identifier, get all versions and obsoleted (catalog) or
-        Args:
-          return_dict:
-          filter_type:
-          PID:
-          req_session:
-
-        Returns:
-
-        '''
-
-        if req_session is None:
-            req_session = requests.Session()
-        if filter_type == "catalog":
-            PIDs = self.resolvePIDs([PID, ], req_session=req_session)
-        if filter_type == "package":
-            PIDs = self.resolvePackagePIDs([PID, ], req_session=req_session)
-        return_dict[PID] = PIDs
-        return [PID, PIDs]
-
-
-
-    def resolvePackagePIDs(self, PIDs, req_session=None):
-        """
-        Checks for the versions and obsolecence chain of the given PID
-        :param PID:
-        :return: A list of pids for previous versions and their data + metadata objects
-        """
-        logger = logging.getLogger('resolvePackagePIDs')
-        logger.debug("enter resolvePackagePIDs")
-
-        callSolr = True
-        if req_session is None:
-            req_session = requests.Session()
-        while (callSolr):
-
-            # Querying for all the PIDs that we got from the previous iteration
-            # Would be a single PID if this is the first iteration.
-            identifier = '(("' + '") OR ("'.join(PIDs) + '"))'
-
-            # Forming the query dictionary to be sent as a file to the Solr endpoint via the HTTP Post request.
-            queryDict = {}
-            queryDict["fq"] = (None, 'id:*' + identifier)
-            queryDict["fl"] = (None, 'obsoletes')
-            queryDict["wt"] = (None, "json")
-
-            # Getting length of the array from previous iteration to control the loop
-            prevLength = len(PIDs)
-
-            resp = req_session.post(url=self._config["solr_query_url"], files=queryDict)
-
-            if (resp.status_code == 200):
-                PIDs = self.parseResponse(resp, PIDs)
-
-            if (prevLength == len(PIDs)):
-                callSolr = False
-
-        logger.debug("exit resolvePackagePIDs")
-        return PIDs
-
-
-
-    def resolveDataPackagePID(self, obsoletes_dict, PID, req_session=None):
-
-        if req_session is None:
-            req_session = requests.Session()
-        # Forming the query dictionary to be sent as a file to the Solr endpoint via the HTTP Post request.
-        queryString = 'q=id:"' + PID + '"&fl=obsoletes&wt=json'
-        params = {'q': 'id:"' + PID + '"',
-                  'fl': 'obsoletes',
-                  'wt': 'json'}
-
-        res = None
-        resp = req_session.get(url=self._config["solr_query_url"], params=params)
-        if (resp.status_code == 200):
-            PIDs = self.parseResponse(resp, [])
-            if (len(PIDs) != 0):
-                obsoletes_dict[PID] = PIDs[0]
-                res = PIDs[0]
-            else:
-                pass
-        return res
-
 
 
     def parsePackageCounts(self, data, PIDs, obsoletesDictionary):
@@ -1004,6 +893,31 @@ class MetricsReader:
             pass
         self.logger.debug("exit getRepositoryCitationPIDs, elapsed=%fsec", time.time() - t_0)
         return(results)
+
+
+    def quoteTerm(self, term):
+      '''
+      Return a quoted, escaped Solr query term
+      Args:
+        term: (string) term to be escaped and quoted
+
+      Returns: (string) quoted, escaped term
+      '''
+      return '"' + self.escapeSolrQueryTerm(term) + '"'
+
+
+    def escapeSolrQueryTerm(self, term):
+      '''
+      Escape a solr query term for solr reserved characters
+      Args:
+        term: query term to be escaped
+
+      Returns: string, the escaped query term
+      '''
+      term = term.replace('\\', '\\\\')
+      for c in SOLR_RESERVED_CHAR_LIST:
+        term = term.replace(c, '\{}'.format(c))
+      return term
 
 
 

@@ -299,20 +299,19 @@ def getResolvePIDs(PIDs, solr_url=None):
     #always return at least this identifier
     result.append(an_id)
     params = {'wt':'json',
-              'fl':'id',
-              'q.op':'OR',
+              'fl':'id,resourceMap',
               }
-    params['q'] = "{!join from=resourceMap to=resourceMap}id:" + quoteTerm(an_id)
+    params['q'] = "((id:" + quoteTerm(an_id) + ") OR (seriesId:" + quoteTerm(an_id) + "))"
     response = session.get(url, params=params)
     if response.status_code == requests.codes.ok:
       #continue
       result = _getIdsFromSolrResponse(response.text, result)
       more_work = True
-      params['fl'] = 'id,documents,obsoletes,resourceMap'
+      params['fl'] = 'documents,obsoletes'
       while more_work:
         current_length = len(result)
-        query = " ".join( map(quoteTerm, result) )
-        params['q'] = 'resourceMap:(' + query + ')'
+        query = ") OR (".join( map(quoteTerm, result) )
+        params['q'] = 'id:(' + query + ')'
         response = session.get(url, params=params)
         if response.status_code == requests.codes.ok:
           result = _getIdsFromSolrResponse(response.text, result)
