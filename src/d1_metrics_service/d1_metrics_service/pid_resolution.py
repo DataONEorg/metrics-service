@@ -99,7 +99,7 @@ def _getIdsFromSolrResponse(response_text, pids=[]):
       pass
     try:
       pid = doc['obsoletes']
-      if not pid in pid:
+      if not pid in pids:
         pids.append(pid)
     except KeyError as e:
       pass
