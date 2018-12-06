@@ -295,26 +295,51 @@ def getResolvePIDs(PIDs, solr_url=None):
 
   def _fetch(url, an_id):
     session = requests.Session()
+
+    resMap = []
     result = []
     #always return at least this identifier
-    result.append(an_id)
+    result.append(PIDstring)
     params = {'wt':'json',
-              'fl':'id,resourceMap',
+              'fl':'resourceMap'
               }
-    params['q'] = "((id:" + quoteTerm(an_id) + ") OR (seriesId:" + quoteTerm(an_id) + "))"
-    response = session.get(url, params=params)
+    params['q'] = "((id:" + self.quoteTerm(PIDstring) + ") OR (seriesId:" + self.quoteTerm(PIDstring) + "))"
+    response = session.get(self._config["solr_query_url"], params=params)
     if response.status_code == requests.codes.ok:
       #continue
-      result = _getIdsFromSolrResponse(response.text, result)
-      more_work = True
-      params['fl'] = 'documents,obsoletes'
+      resMap = self.parseResponse(response, resMap)
+      more_resMap_work = True
+      params['fl'] = 'obsoletes'
+
+      while more_resMap_work:
+        current_length = len(resMap)
+        query = ") OR (".join(map(self.quoteTerm, resMap))
+        params['q'] = "id:(" + self.quoteTerm(query) + ")"
+        response = session.get(self._config["solr_query_url"], params=params)
+
+        if response.status_code == requests.codes.ok:
+          resMap = self.parseResponse(response, resMap)
+          if len(resMap) == current_length:
+            more_resMap_work = False
+        else:
+          more_resMap_work = False
+
+      params['fl'] = 'id,documents,obsoletes'
+      query = ") OR (".join(map(self.quoteTerm, resMap))
+      params['q'] = "resMap:(" + self.quoteTerm(query) + ")"
+      response = session.get(self._config["solr_query_url"], params=params)
+
+      if response.status_code == requests.codes.ok:
+        result = self.parseResponse(response, result)
+
+      params['fl'] = 'id,documents,obsoletes'
       while more_work:
         current_length = len(result)
-        query = ") OR (".join( map(quoteTerm, result) )
+        query = ") OR (".join( map(self.quoteTerm, result) )
         params['q'] = 'id:(' + query + ')'
-        response = session.get(url, params=params)
+        response = session.get(self._config["solr_query_url"], params=params)
         if response.status_code == requests.codes.ok:
-          result = _getIdsFromSolrResponse(response.text, result)
+          result = self.parseResponse(response, result)
           if len(result) == current_length:
             more_work = False
         else:

@@ -403,31 +403,57 @@ class MetricsReader:
         # q = "{!join from=resourceMap to=resourceMap}"
 
         session = requests.Session()
+        resMap = []
         result = []
         #always return at least this identifier
         result.append(PIDstring)
-        params = {'wt':'json',
-                  'fl':'id,resourceMap'
+        params = {'wt':(None,'json'),
+                  'fl':(None,'resourceMap')
                   }
-        params['q'] = "((id:" + self.quoteTerm(PIDstring) + ") OR (seriesId:" + self.quoteTerm(PIDstring) + "))"
+        params['fq'] = (None,"((id:" + self.quoteTerm(PIDstring) + ") OR (seriesId:" + self.quoteTerm(PIDstring) + "))")
         response = session.get(self._config["solr_query_url"], params=params)
         if response.status_code == requests.codes.ok:
-          #continue
-          result = self.parseResponse(response, result)
-          more_work = True
-          params['fl'] = 'documents,obsoletes'
-          while more_work:
-            current_length = len(result)
-            query = ") OR (".join( map(self.quoteTerm, result) )
-            params['q'] = 'id:(' + query + ')'
-            response = session.get(self._config["solr_query_url"], params=params)
-            if response.status_code == requests.codes.ok:
+            #continue
+            resMap = self.parseResponse(response, resMap)
+            more_resMap_work = True
+            params['fl'] = (None,'obsoletes')
 
-              result = self.parseResponse(response, result)
-              if len(result) == current_length:
-                more_work = False
-            else:
-              more_work = False
+            while more_resMap_work:
+                current_length = len(resMap)
+                query = ") OR (".join(map(self.quoteTerm, resMap))
+                params['fq'] = (None,"id:(" + self.quoteTerm(query) + ")")
+                response = session.post(self._config["solr_query_url"], files=params)
+
+                if response.status_code == requests.codes.ok:
+
+                    resMap = self.parseResponse(response, resMap)
+                    if len(resMap) == current_length:
+                        more_resMap_work = False
+                else:
+                    more_resMap_work = False
+
+            params['fl'] = (None,'id,documents,obsoletes')
+            query = ") OR (".join(map(self.quoteTerm, resMap))
+            params['fq'] = (None,"resourceMap:((" + self.quoteTerm(query) + "))")
+            response = session.post(self._config["solr_query_url"], files=params)
+
+            if response.status_code == requests.codes.ok:
+                result = self.parseResponse(response, result)
+
+            params['fl'] = (None,'id,documents,obsoletes')
+            more_work = True
+            while more_work:
+                current_length = len(result)
+                query = ") OR (".join( map(self.quoteTerm, result) )
+                params['fq'] = (None,'id:((' + query + '))')
+                response = session.post(self._config["solr_query_url"], files=params)
+                if response.status_code == requests.codes.ok:
+
+                    result = self.parseResponse(response, result)
+                    if len(result) == current_length:
+                        more_work = False
+                else:
+                    more_work = False
 
 
         logger.debug("resolvePIDs response = %s", json.dumps(result))
