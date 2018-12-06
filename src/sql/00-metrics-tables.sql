@@ -50,6 +50,20 @@ create table citations (
     primary key(target_id, source_id, link_publication_date)
 );
 
+
+/*
+ * Citations SOLR metadata - which will be used for different facets
+ */
+ create table citation_metadata (
+    id SERIAL,                    -- identifier of the record
+    target_id TEXT NOT NULL ,               -- target(dataset that was cited) identifier
+    origin TEXT[],
+    node_id TEXT[],
+    awards TEXT[],
+    funding TEXT[],
+    primary key(target_id)
+);
+
 /*
  * db_metadata -- table to store arbitrary key, value pairs for application state and configuration
  */
