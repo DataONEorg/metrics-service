@@ -293,29 +293,28 @@ def getResolvePIDs(PIDs, solr_url=None):
   Returns:
   '''
 
-  def _fetch(url, PIDstring):
+  def _fetch(url, an_id):
     session = requests.Session()
-
     resMap = []
     result = []
     #always return at least this identifier
-    result.append(PIDstring)
-    params = {'wt':'json',
-              'fl':'resourceMap'
+    result.append(an_id)
+    params = {'wt':(None,'json'),
+              'fl':(None,'resourceMap')
               }
-    params['q'] = "((id:" + quoteTerm(PIDstring) + ") OR (seriesId:" + quoteTerm(PIDstring) + "))"
-    response = session.get(url, params=params)
+    params['fq'] = (None,"((id:" + quoteTerm(an_id) + ") OR (seriesId:" + quoteTerm(an_id) + "))")
+    response = session.post(url, files=params)
     if response.status_code == requests.codes.ok:
       #continue
-      resMap = _getIdsFromSolrResponse(response.text, resMap)
+      resMap = _getIdsFromSolrResponse(response.text,resMap)
       more_resMap_work = True
-      params['fl'] = 'obsoletes'
+      params['fl'] = (None,'obsoletes')
 
       while more_resMap_work:
         current_length = len(resMap)
         query = ") OR (".join(map(quoteTerm, resMap))
-        params['q'] = "id:(" + quoteTerm(query) + ")"
-        response = session.get(url, params=params)
+        params['fq'] = (None,"id:((" + query + "))")
+        response = session.post(url, files=params)
 
         if response.status_code == requests.codes.ok:
           resMap = _getIdsFromSolrResponse(response.text, resMap)
@@ -324,20 +323,22 @@ def getResolvePIDs(PIDs, solr_url=None):
         else:
           more_resMap_work = False
 
-      params['fl'] = 'id,documents,obsoletes'
+      params['fl'] = (None,'id,documents,obsoletes')
       query = ") OR (".join(map(quoteTerm, resMap))
-      params['q'] = "resMap:(" + quoteTerm(query) + ")"
-      response = session.get(url, params=params)
+      params['fq'] = (None,"resMap:((" + query + "))")
+      response = session.post(url, files=params)
 
       if response.status_code == requests.codes.ok:
         result = _getIdsFromSolrResponse(response.text, result)
 
-      params['fl'] = 'id,documents,obsoletes'
+      params['fl'] = (None,'id,documents,obsoletes')
+
+      more_work = True
       while more_work:
         current_length = len(result)
         query = ") OR (".join( map(quoteTerm, result) )
-        params['q'] = 'id:(' + query + ')'
-        response = session.get(url, params=params)
+        params['fq'] = (None,'id:((' + query + '))')
+        response = session.post(url, files=params)
         if response.status_code == requests.codes.ok:
           result = _getIdsFromSolrResponse(response.text, result)
           if len(result) == current_length:
