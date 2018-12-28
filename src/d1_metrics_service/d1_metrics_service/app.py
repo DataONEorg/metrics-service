@@ -11,7 +11,7 @@ We create unique resource and map to its endpoint.
 import falcon
 import logging
 
-from .metricsreader import MetricsReader
+from d1_metrics_service.metricsreader import MetricsReader
 
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s %(name)18s: %(message)s'

@@ -146,9 +146,8 @@ class MetricsReader:
         t_start = time.time()
         metrics_elastic_search = MetricsElasticSearch()
         metrics_elastic_search.connect()
-        PIDs = self.resolvePIDs(PIDs)
-        # PIDsDict = pid_resolution.getResolvePIDs(PIDs)
-        # PIDs = PIDsDict[PIDs[0]]
+        PIDDict = pid_resolution.getResolvePIDs(PIDs)
+        PIDs = PIDDict[PIDs[0]]
         t_delta = time.time() - t_start
         self.logger.debug('getSummaryMetricsPerDataset:t1=%.4f', t_delta)
 
@@ -267,7 +266,6 @@ class MetricsReader:
         return (self.formatDataPerDataset(data, PIDs, obsoletesDictionary))
 
 
-
     def formatDataPerDataset(self, data, PIDs, obsoletesDictionary):
         """
         Formats the data into the specified Swagger format
@@ -382,113 +380,6 @@ class MetricsReader:
                     results["citations"].append(totals)
 
         return results, resultDetails
-
-
-
-    def resolvePIDs(self, PIDs, req_session=None):
-        """
-        Checks for the versions and obsolecence chain of the given PID
-        :param PID:
-        :return: A list of pids for previous versions and their data + metadata objects
-        """
-        logger = logging.getLogger('resolvePIDs')
-        logger.debug("enter resolvePIDs")
-
-        PIDstring = PIDs[0]
-
-        # get the ids for all the previous versions and their data / metadata object till the current `pid` version
-        # p.s. this might not be the latest version!
-
-        # fl = "documents, obsoletes, resourceMap"
-        # q = "{!join from=resourceMap to=resourceMap}"
-
-        session = requests.Session()
-        resMap = []
-        result = []
-        #always return at least this identifier
-        result.append(PIDstring)
-        params = {'wt':(None,'json'),
-                  'fl':(None,'resourceMap')
-                  }
-        params['fq'] = (None,"((id:" + self.quoteTerm(PIDstring) + ") OR (seriesId:" + self.quoteTerm(PIDstring) + "))")
-        response = session.get(self._config["solr_query_url"], params=params)
-        if response.status_code == requests.codes.ok:
-            #continue
-            resMap = self.parseResponse(response, resMap)
-            more_resMap_work = True
-            params['fl'] = (None,'obsoletes')
-
-            while more_resMap_work:
-                current_length = len(resMap)
-                query = ") OR (".join(map(self.quoteTerm, resMap))
-                params['fq'] = (None,"id:(" + self.quoteTerm(query) + ")")
-                response = session.post(self._config["solr_query_url"], files=params)
-
-                if response.status_code == requests.codes.ok:
-
-                    resMap = self.parseResponse(response, resMap)
-                    if len(resMap) == current_length:
-                        more_resMap_work = False
-                else:
-                    more_resMap_work = False
-
-            params['fl'] = (None,'id,documents,obsoletes')
-            query = ") OR (".join(map(self.quoteTerm, resMap))
-            params['fq'] = (None,"resourceMap:((" + self.quoteTerm(query) + "))")
-            response = session.post(self._config["solr_query_url"], files=params)
-
-            if response.status_code == requests.codes.ok:
-                result = self.parseResponse(response, result)
-
-            params['fl'] = (None,'id,documents,obsoletes')
-            more_work = True
-            while more_work:
-                current_length = len(result)
-                query = ") OR (".join( map(self.quoteTerm, result) )
-                params['fq'] = (None,'id:((' + query + '))')
-                response = session.post(self._config["solr_query_url"], files=params)
-                if response.status_code == requests.codes.ok:
-
-                    result = self.parseResponse(response, result)
-                    if len(result) == current_length:
-                        more_work = False
-                else:
-                    more_work = False
-
-
-        logger.debug("resolvePIDs response = %s", json.dumps(result))
-        logger.debug("exit resolvePIDs")
-        return result
-
-
-
-    def parseResponse(self, resp, PIDs):
-        response = resp.json()
-
-        for doc in response["response"]["docs"]:
-            # Checks if the pid has any data / metadata objects
-            if "id" in doc:
-                if doc["id"] not in PIDs:
-                    PIDs.append(doc["id"])
-
-            if "documents" in doc:
-                for j in doc["documents"]:
-                    if j not in PIDs:
-                        PIDs.append(j)
-
-            # Checks for the previous versions of the pid
-            if "obsoletes" in doc:
-                if doc["obsoletes"] not in PIDs:
-                    PIDs.append(doc["obsoletes"])
-
-            # Checks for the resource maps of the pid
-            if "resourceMap" in doc:
-                for j in doc["resourceMap"]:
-                    if j not in PIDs:
-                        PIDs.append(j)
-
-        return PIDs
-
 
 
     def gatherCitations(self, PIDs, metrics_database=None):
