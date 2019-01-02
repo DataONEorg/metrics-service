@@ -300,7 +300,8 @@ def getResolvePIDs(PIDs, solr_url=None):
     #always return at least this identifier
     result.append(an_id)
     params = {'wt':(None,'json'),
-              'fl':(None,'resourceMap')
+              'fl':(None,'documents,resourceMap'),
+              'rows':(None,1000)
               }
     params['fq'] = (None,"((id:" + quoteTerm(an_id) + ") OR (seriesId:" + quoteTerm(an_id) + "))")
     response = session.post(url, files=params)
@@ -330,8 +331,6 @@ def getResolvePIDs(PIDs, solr_url=None):
 
       if response.status_code == requests.codes.ok:
         result = _getIdsFromSolrResponse(response.text, result)
-
-      params['fl'] = (None,'id,documents,obsoletes')
 
       more_work = True
       while more_work:
