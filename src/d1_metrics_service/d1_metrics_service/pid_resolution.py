@@ -325,7 +325,7 @@ def getResolvePIDs(PIDs, solr_url=None):
 
       params['fl'] = (None,'id,documents,obsoletes')
       query = ") OR (".join(map(quoteTerm, resMap))
-      params['fq'] = (None,"resMap:((" + query + "))")
+      params['fq'] = (None,"resourceMap:((" + query + "))")
       response = session.post(url, files=params)
 
       if response.status_code == requests.codes.ok:
