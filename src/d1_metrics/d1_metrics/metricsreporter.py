@@ -395,8 +395,6 @@ class MetricsReporter(object):
 
                 dataset["data-type"] = "dataset"
 
-                dataset["access-method"] = "regular"
-
                 dataset["performance"] = []
                 performance = {}
 
@@ -413,10 +411,12 @@ class MetricsReporter(object):
 
                 if ("METADATA" in report_instances):
                     total_dataset_investigation = {"count": report_instances["METADATA"]["total_investigations"],
+                                                   "access-method": "regular",
                                                    "metric-type": "total-dataset-investigations",
                                                    "country-counts": report_instances["METADATA"]["country_total_investigations"]}
 
                     unique_dataset_investigation = {"count": report_instances["METADATA"]["unique_investigations"],
+                                                    "access-method": "regular",
                                                     "metric-type": "unique-dataset-investigations",
                                                     "country-counts": report_instances["METADATA"]["country_unique_investigations"]}
                     instance.append(total_dataset_investigation)
@@ -425,12 +425,14 @@ class MetricsReporter(object):
 
                 if("DATA" in report_instances):
                     total_dataset_requests = {"count": report_instances["DATA"]["total_requests"],
-                                                   "metric-type": "total-dataset-requests",
-                                                   "country-counts": report_instances["DATA"]["country_total_requests"]}
+                                              "access-method": "regular",
+                                              "metric-type": "total-dataset-requests",
+                                              "country-counts": report_instances["DATA"]["country_total_requests"]}
 
                     unique_dataset_requests = {"count": report_instances["DATA"]["unique_requests"],
-                                                    "metric-type": "unique-dataset-requests",
-                                                    "country-counts": report_instances["DATA"]["country_unique_requests"]}
+                                               "access-method": "regular",
+                                               "metric-type": "unique-dataset-requests",
+                                               "country-counts": report_instances["DATA"]["country_unique_requests"]}
                     instance.append(total_dataset_requests)
                     instance.append(unique_dataset_requests)
 
