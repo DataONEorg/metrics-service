@@ -225,23 +225,23 @@ class MetricsReporter(object):
                     report_instances["METADATA"]["unique_investigations"] = report_instances["METADATA"]["unique_investigations"] + 1
                     report_instances["METADATA"]["total_investigations"] = report_instances["METADATA"][
                                                                                 "total_investigations"] + i["doc_count"]
-                    if i["key"]["country"] in report_instances["METADATA"]["country_unique_investigations"]:
-                        report_instances["METADATA"]["country_unique_investigations"][i["key"]["country"]] = \
-                            report_instances["METADATA"]["country_unique_investigations"][i["key"]["country"]] + 1
-                        report_instances["METADATA"]["country_total_investigations"][i["key"]["country"]] = \
-                        report_instances["METADATA"]["country_total_investigations"][i["key"]["country"]] + i["doc_count"]
+                    if (i["key"]["country"]).lower() in report_instances["METADATA"]["country_unique_investigations"]:
+                        report_instances["METADATA"]["country_unique_investigations"][(i["key"]["country"]).lower()] = \
+                            report_instances["METADATA"]["country_unique_investigations"][(i["key"]["country"]).lower()] + 1
+                        report_instances["METADATA"]["country_total_investigations"][(i["key"]["country"]).lower()] = \
+                        report_instances["METADATA"]["country_total_investigations"][(i["key"]["country"]).lower()] + i["doc_count"]
                     else:
-                        report_instances["METADATA"]["country_unique_investigations"][i["key"]["country"]] = 1
-                        report_instances["METADATA"]["country_total_investigations"][i["key"]["country"]] = i["doc_count"]
+                        report_instances["METADATA"]["country_unique_investigations"][(i["key"]["country"]).lower()] = 1
+                        report_instances["METADATA"]["country_total_investigations"][(i["key"]["country"]).lower()] = i["doc_count"]
                 else:
                     report_instances["METADATA"] = {
                         "unique_investigations" : 1,
                         "total_investigations": i["doc_count"],
                         "country_unique_investigations": {
-                            i["key"]["country"]: 1
+                            (i["key"]["country"]).lower(): 1
                         },
                         "country_total_investigations": {
-                            i["key"]["country"]: i["doc_count"]
+                            (i["key"]["country"]).lower(): i["doc_count"]
                         }
                     }
             if (i["key"]["format"] == "DATA"):
@@ -254,30 +254,30 @@ class MetricsReporter(object):
                                                                                 "unique_requests"] + 1
                     report_instances["DATA"]["total_requests"] = report_instances["DATA"][
                                                                                "total_requests"] + i["doc_count"]
-                    if i["key"]["country"] in report_instances["DATA"]["country_unique_requests"]:
-                        report_instances["METADATA"]["country_unique_investigations"][i["key"]["country"]] = \
-                            report_instances["METADATA"]["country_unique_investigations"][i["key"]["country"]] + 1
-                        report_instances["METADATA"]["country_total_investigations"][i["key"]["country"]] = \
-                            report_instances["METADATA"]["country_total_investigations"][i["key"]["country"]] + i[
+                    if (i["key"]["country"]).lower() in report_instances["DATA"]["country_unique_requests"]:
+                        report_instances["METADATA"]["country_unique_investigations"][(i["key"]["country"]).lower()] = \
+                            report_instances["METADATA"]["country_unique_investigations"][(i["key"]["country"]).lower()] + 1
+                        report_instances["METADATA"]["country_total_investigations"][(i["key"]["country"]).lower()] = \
+                            report_instances["METADATA"]["country_total_investigations"][(i["key"]["country"]).lower()] + i[
                                 "doc_count"]
-                        report_instances["DATA"]["country_unique_requests"][i["key"]["country"]] = \
-                            report_instances["DATA"]["country_unique_requests"][i["key"]["country"]] + 1
-                        report_instances["DATA"]["country_total_requests"][i["key"]["country"]] = \
-                            report_instances["DATA"]["country_total_requests"][i["key"]["country"]] + i[
+                        report_instances["DATA"]["country_unique_requests"][(i["key"]["country"]).lower()] = \
+                            report_instances["DATA"]["country_unique_requests"][(i["key"]["country"]).lower()] + 1
+                        report_instances["DATA"]["country_total_requests"][(i["key"]["country"]).lower()] = \
+                            report_instances["DATA"]["country_total_requests"][(i["key"]["country"]).lower()] + i[
                                 "doc_count"]
                     else:
-                        if i["key"]["country"] in report_instances["METADATA"]["country_unique_investigations"]:
-                            report_instances["METADATA"]["country_unique_investigations"][i["key"]["country"]] = \
-                                report_instances["METADATA"]["country_unique_investigations"][i["key"]["country"]] + 1
-                            report_instances["METADATA"]["country_total_investigations"][i["key"]["country"]] = \
-                                report_instances["METADATA"]["country_total_investigations"][i["key"]["country"]] + i[
+                        if (i["key"]["country"]).lower() in report_instances["METADATA"]["country_unique_investigations"]:
+                            report_instances["METADATA"]["country_unique_investigations"][(i["key"]["country"]).lower()] = \
+                                report_instances["METADATA"]["country_unique_investigations"][(i["key"]["country"]).lower()] + 1
+                            report_instances["METADATA"]["country_total_investigations"][(i["key"]["country"]).lower()] = \
+                                report_instances["METADATA"]["country_total_investigations"][(i["key"]["country"]).lower()] + i[
                                     "doc_count"]
                         else:
-                            report_instances["METADATA"]["country_unique_investigations"][i["key"]["country"]] = 1
-                            report_instances["METADATA"]["country_total_investigations"][i["key"]["country"]] = i[
+                            report_instances["METADATA"]["country_unique_investigations"][(i["key"]["country"]).lower()] = 1
+                            report_instances["METADATA"]["country_total_investigations"][(i["key"]["country"]).lower()] = i[
                                 "doc_count"]
-                        report_instances["DATA"]["country_unique_requests"][i["key"]["country"]] = 1
-                        report_instances["DATA"]["country_total_requests"][i["key"]["country"]] = i[
+                        report_instances["DATA"]["country_unique_requests"][(i["key"]["country"]).lower()] = 1
+                        report_instances["DATA"]["country_total_requests"][(i["key"]["country"]).lower()] = i[
                             "doc_count"]
                 else:
                     if "METADATA" in report_instances:
@@ -286,35 +286,35 @@ class MetricsReporter(object):
                         report_instances["METADATA"]["total_investigations"] = report_instances["METADATA"][
                                                                                    "total_investigations"] + i[
                                                                                    "doc_count"]
-                        if i["key"]["country"] in report_instances["METADATA"]["country_unique_investigations"]:
-                            report_instances["METADATA"]["country_unique_investigations"][i["key"]["country"]] = \
-                                report_instances["METADATA"]["country_unique_investigations"][i["key"]["country"]] + 1
-                            report_instances["METADATA"]["country_total_investigations"][i["key"]["country"]] = \
-                                report_instances["METADATA"]["country_total_investigations"][i["key"]["country"]] + i[
+                        if (i["key"]["country"]).lower() in report_instances["METADATA"]["country_unique_investigations"]:
+                            report_instances["METADATA"]["country_unique_investigations"][(i["key"]["country"]).lower()] = \
+                                report_instances["METADATA"]["country_unique_investigations"][(i["key"]["country"]).lower()] + 1
+                            report_instances["METADATA"]["country_total_investigations"][(i["key"]["country"]).lower()] = \
+                                report_instances["METADATA"]["country_total_investigations"][(i["key"]["country"]).lower()] + i[
                                     "doc_count"]
                         else:
-                            report_instances["METADATA"]["country_unique_investigations"][i["key"]["country"]] = 1
-                            report_instances["METADATA"]["country_total_investigations"][i["key"]["country"]] = i[
+                            report_instances["METADATA"]["country_unique_investigations"][(i["key"]["country"]).lower()] = 1
+                            report_instances["METADATA"]["country_total_investigations"][(i["key"]["country"]).lower()] = i[
                                 "doc_count"]
                     else:
                         report_instances["METADATA"] = {
                             "unique_investigations": 1,
                             "total_investigations": i["doc_count"],
                             "country_unique_investigations": {
-                                i["key"]["country"]: 1
+                                (i["key"]["country"]).lower(): 1
                             },
                             "country_total_investigations": {
-                                i["key"]["country"]: i["doc_count"]
+                                (i["key"]["country"]).lower(): i["doc_count"]
                             }
                         }
                     report_instances["DATA"] = {
                         "unique_requests": 1,
                         "total_requests": i["doc_count"],
                         "country_unique_requests": {
-                            i["key"]["country"]: 1
+                            (i["key"]["country"]).lower(): 1
                         },
                         "country_total_requests": {
-                            i["key"]["country"]: i["doc_count"]
+                            (i["key"]["country"]).lower(): i["doc_count"]
                         }
                     }
         return report_instances
@@ -572,7 +572,7 @@ class MetricsReporter(object):
 
                 unique_pids = self.get_unique_pids(start_date, end_date, node, doi=True)
 
-                if (len(unique_pids) > 0 and len(unique_pids) < 5000):
+                if (len(unique_pids) > 0 and len(unique_pids) < 1000):
                     self.logger.debug("Job " + " : " + start_date + " to " + end_date)
 
                     # Uncomment me to send reports to the HUB!
