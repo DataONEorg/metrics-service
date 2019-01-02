@@ -572,7 +572,7 @@ class MetricsReporter(object):
 
                 unique_pids = self.get_unique_pids(start_date, end_date, node, doi=True)
 
-                if (len(unique_pids) > 0 and len(unique_pids) < 1000):
+                if (len(unique_pids) > 0):
                     self.logger.debug("Job " + " : " + start_date + " to " + end_date)
 
                     # Uncomment me to send reports to the HUB!
@@ -591,10 +591,10 @@ class MetricsReporter(object):
                         self.logger.error(str(response.status_code) + " " + response.reason)
                         self.logger.error("Headers: " + str(response.headers))
                         self.logger.error("Content: " + str((response.content).decode("utf-8")))
-                elif (len(unique_pids) > 5000):
-                    self.logger.debug("Skipping job for " + node  + " " + start_date + " to " + end_date + " - length of PIDS : " + str(len(unique_pids)))
                 else:
-                    pass
+                    self.logger.debug(
+                        "Skipping job for " + node + " " + start_date + " to " + end_date + " - length of PIDS : " + str(
+                            len(unique_pids)))
 
     def last_day_of_month(self, date):
         if date.month == 12:
