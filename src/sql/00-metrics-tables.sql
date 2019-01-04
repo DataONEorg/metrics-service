@@ -55,12 +55,11 @@ create table citations (
  * Citations SOLR metadata - which will be used for different facets
  */
  create table citation_metadata (
-    id SERIAL,                    -- identifier of the record
-    target_id TEXT NOT NULL ,               -- target(dataset that was cited) identifier
-    origin TEXT[],
-    node_id TEXT[],
-    awards TEXT[],
-    funding TEXT[],
+    id SERIAL,                    -- identifier of the record. (not null)
+    target_id TEXT NOT NULL ,     -- target(dataset that was cited) identifier. DataONE pid. (not null)
+    origin TEXT[],                -- author names associated with the citation.
+    node_id TEXT[],               -- Corresponding authoritativeMn for the given target_id (pid)
+    awards TEXT[]                 -- Award numbers associated with the pid
     primary key(target_id)
 );
 
