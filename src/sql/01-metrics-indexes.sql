@@ -1,0 +1,11 @@
+CREATE INDEX metrics_idx1 ON metrics (repository, metrics_name, metrics_value);
+CREATE INDEX metrics_idx2 ON metrics (metrics_name, award_number, location, month, year, metrics_value);
+CREATE INDEX metrics_idx3 ON metrics (repository, metrics_name, year, metrics_value);
+CREATE INDEX metrics_idx4 ON metrics (repository, metrics_name, month, metrics_value);
+CREATE INDEX metrics_idx5 ON metrics (repository, metrics_name, month, year, metrics_value);
+CREATE INDEX metrics_idx6 ON metrics (repository, metrics_name, day, month, year, metrics_value);
+CREATE INDEX metrics_idx7 ON metrics (dataset_id, metrics_name, user_id, metrics_value);
+CREATE INDEX metrics_idx8 ON metrics (dataset_id, metrics_name, month, year, metrics_value);
+CREATE INDEX metrics_idx9 ON metrics (user_id, metrics_name, month, year, metrics_value);
+CREATE INDEX metrics_idx10 ON metrics (repository, metrics_name, month, year, metrics_value);
+CREATE INDEX metrics_idx11 ON metrics (award_number, metrics_name, month, year, metrics_value);
