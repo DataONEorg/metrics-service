@@ -309,7 +309,7 @@ def getResolvePIDs(PIDs, solr_url=None):
       #continue
       resMap = _getIdsFromSolrResponse(response.text,resMap)
       more_resMap_work = True
-      params['fl'] = (None,'obsoletes')
+      params['fl'] = (None,'documents,obsoletes')
 
       while more_resMap_work:
         current_length = len(resMap)
