@@ -516,17 +516,29 @@ class MetricsReporter(object):
         return PIDs
 
 
-    def send_reports(self,  start_date, end_date, node):
+    def send_reports(self, start_date, end_date, node):
         """
         Sends report to the Hub at the specified Hub report url in the config parameters
+        :param: start_date - the starting range of dataset events included in the reports
+        :param: end_date - the starting range of dataset events included in the reports
+        :param: node - the authoritative MN the report was generated for
         :return: Nothing
         """
         s = requests.session()
         s.headers.update(
-            {'Authorization': "Bearer " +  self._config["auth_token"], 'Content-Type': 'application/json', 'Accept': 'application/json'})
+            {'Authorization': "Bearer " +  self._config["auth_token"], 'Content-Type': 'application/gzip', 'Accept': 'gzip', 'Content-Encoding': 'gzip'})
+
         with open("./reports/DSR-D1-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')+ "-" + node+'.json', 'r') as content_file:
-            content = content_file.read()
-        response = s.post(self._config["report_url"], data=content.encode("utf-8"))
+            # JSON large object data
+            jlob = content_file.read()
+
+            # JSON large object bytes
+            jlob = jlob.encode("utf-8")
+
+            with open(name + ".gzip", mode="w") as f:
+                f.write(gzip.compress(jlob))
+
+        response = s.post(self._config["report_url"], data=gzip.compress(jlob))
 
         return response
 
@@ -534,7 +546,7 @@ class MetricsReporter(object):
     def query_solr(self, PID):
         """
         Queries the Solr end-point for metadata given the PID.
-        :param PID:
+        :param PID: The dataset identifier used to retreive the metadata
         :return: JSON Object containing the metadata fields queried from Solr
         """
 
@@ -567,9 +579,6 @@ class MetricsReporter(object):
                 start_date, end_date = prevDate.strftime('%m/%d/%Y'),\
                              date.strftime('%m/%d/%Y')
 
-
-
-
                 unique_pids = self.get_unique_pids(start_date, end_date, node, doi=True)
 
                 if (len(unique_pids) > 0):
@@ -577,7 +586,6 @@ class MetricsReporter(object):
 
                     # Uncomment me to send reports to the HUB!
                     response = self.report_handler(start_date, end_date, node, unique_pids)
-
 
                     logentry = "Node " + node + " : " + start_date + " to " + end_date + " === " + str(response.status_code)
 
@@ -596,11 +604,17 @@ class MetricsReporter(object):
                         "Skipping job for " + node + " " + start_date + " to " + end_date + " - length of PIDS : " + str(
                             len(unique_pids)))
 
+
     def last_day_of_month(self, date):
+        """
+        Simple utility funciton
+        Returns the last day of the month to set the end_date range for report generation
+        :param date:
+        :return:
+        """
         if date.month == 12:
             return date.replace(day=31)
         return date.replace(month=date.month + 1, day=1) - timedelta(days=1)
-
 
 
     def get_MN_List(self):
@@ -619,9 +633,6 @@ class MetricsReporter(object):
             if (node_type == "mn"):
                 mn_list.add(identifier.text)
         return(mn_list)
-
-
-
 
 
 if __name__ == "__main__":
