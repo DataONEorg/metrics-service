@@ -15,6 +15,7 @@ from datetime import datetime
 from datetime import timedelta
 from urllib.parse import quote_plus
 from d1_metrics.metricselasticsearch import MetricsElasticSearch
+from d1_metrics_service import pid_resolution
 from collections import Counter
 from dateutil.relativedelta import relativedelta
 import logging
@@ -406,7 +407,8 @@ class MetricsReporter(object):
                 instance = []
                 pid_list = []
                 pid_list.append(pid)
-                pid_list = self.resolvePIDs(pid_list)
+                PIDDict = pid_resolution.getResolvePIDs(pid_list)
+                pid_list = PIDDict[pid_list[0]]
 
                 report_instances = self.generate_instances(start_date, end_date, pid_list)
 
@@ -460,61 +462,6 @@ class MetricsReporter(object):
         root = ElementTree.fromstring(resp.content)
         name = root.find('name').text
         return name
-
-
-    def resolvePIDs(self, PIDs):
-        """
-        Checks for the versions and obsolecence chain of the given PID
-        :param PID:
-        :return: A list of pids for previous versions and their data + metadata objects
-        """
-
-        # get the ids for all the previous versions and their data / metadata object till the current `pid` version
-        # p.s. this might not be the latest version!
-        callSolr = True
-
-        while (callSolr):
-
-            # Querying for all the PIDs that we got from the previous iteration
-            # Would be a single PID if this is the first iteration.
-            identifier = '(("' + '") OR ("'.join(PIDs) + '"))'
-
-            # Forming the query dictionary to be sent as a file to the Solr endpoint via the HTTP Post request.
-            queryDict = {}
-            queryDict["fq"] = (None, 'id:' + identifier)
-            queryDict["fl"] = (None, 'id,documents,documentedBy,obsoletes,resourceMap')
-            queryDict["wt"] = (None, "json")
-
-            # Getting length of the array from previous iteration to control the loop
-            prevLength = len(PIDs)
-
-            resp = requests.post(url=self._config["solr_query_url"], files=queryDict)
-
-            if (resp.status_code == 200):
-
-                response = resp.json()
-
-                for doc in response["response"]["docs"]:
-                    # Checks if the pid has any data / metadata objects
-                    if "documents" in doc:
-                        for j in doc["documents"]:
-                            if j not in PIDs:
-                                PIDs.append(j)
-
-                    # Checks for the previous versions of the pid
-                    if "obsoletes" in doc:
-                        if doc["obsoletes"] not in PIDs:
-                            PIDs.append(doc["obsoletes"])
-
-                    # Checks for the resource maps of the pid
-                    if "resourceMap" in doc:
-                        for j in doc["resourceMap"]:
-                            if j not in PIDs:
-                                PIDs.append(j)
-
-            if (prevLength == len(PIDs)):
-                callSolr = False
-        return PIDs
 
 
     def send_reports(self, start_date, end_date, node, report_length):
