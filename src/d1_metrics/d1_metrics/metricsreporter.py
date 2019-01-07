@@ -18,6 +18,7 @@ from d1_metrics.metricselasticsearch import MetricsElasticSearch
 from collections import Counter
 from dateutil.relativedelta import relativedelta
 import logging
+import gzip
 
 DEFAULT_REPORT_CONFIGURATION={
     "report_url" : "https://api.datacite.org/reports",
@@ -69,7 +70,7 @@ class MetricsReporter(object):
         json_object["report-datasets"] = self.get_report_datasets(start_date, end_date, unique_pids, node)
         with open('./reports/' + ("DSR-D1-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d'))+ "-" + node+'.json', 'w') as outfile:
             json.dump(json_object, outfile, indent=2,ensure_ascii=False)
-        response = self.send_reports(start_date, end_date, node)
+        response = self.send_reports(start_date, end_date, node, len(unique_pids))
         return response
 
 
@@ -479,9 +480,9 @@ class MetricsReporter(object):
             identifier = '(("' + '") OR ("'.join(PIDs) + '"))'
 
             # Forming the query dictionary to be sent as a file to the Solr endpoint via the HTTP Post request.
-            queryDict =  {}
+            queryDict = {}
             queryDict["fq"] = (None, 'id:' + identifier)
-            queryDict["fl"] =  (None, 'id,documents,documentedBy,obsoletes,resourceMap')
+            queryDict["fl"] = (None, 'id,documents,documentedBy,obsoletes,resourceMap')
             queryDict["wt"] = (None, "json")
 
             # Getting length of the array from previous iteration to control the loop
@@ -489,7 +490,7 @@ class MetricsReporter(object):
 
             resp = requests.post(url=self._config["solr_query_url"], files=queryDict)
 
-            if(resp.status_code == 200):
+            if (resp.status_code == 200):
 
                 response = resp.json()
 
@@ -516,29 +517,51 @@ class MetricsReporter(object):
         return PIDs
 
 
-    def send_reports(self, start_date, end_date, node):
+    def send_reports(self, start_date, end_date, node, report_length):
         """
         Sends report to the Hub at the specified Hub report url in the config parameters
+        - If the number of datasets in the report are less than 5000 send a JSON report
+        - else send a gzipped report
+
         :param: start_date - the starting range of dataset events included in the reports
         :param: end_date - the starting range of dataset events included in the reports
         :param: node - the authoritative MN the report was generated for
-        :return: Nothing
+        :param: report_length The number of datasets included in this report
+        :return: HTTP response from the hub
         """
         s = requests.session()
-        s.headers.update(
-            {'Authorization': "Bearer " +  self._config["auth_token"], 'Content-Type': 'application/gzip', 'Accept': 'gzip', 'Content-Encoding': 'gzip'})
 
-        with open("./reports/DSR-D1-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')+ "-" + node+'.json', 'r') as content_file:
-            # JSON large object data
-            jlob = content_file.read()
+        # Send an unzipped report to the hub
+        if (report_length < 5000):
 
-            # JSON large object bytes
-            jlob = jlob.encode("utf-8")
+            s.headers.update(
+                {'Authorization': "Bearer " + self._config["auth_token"], 'Content-Type': 'application/json',
+                 'Accept': 'application/json'})
 
-            with open(name + ".gzip", mode="w") as f:
-                f.write(gzip.compress(jlob))
+            with open("./reports/DSR-D1-" + (datetime.strptime(end_date, '%m/%d/%Y')).strftime(
+                    '%Y-%m-%d') + "-" + node + '.json', 'r') as content_file:
+                content = content_file.read()
 
-        response = s.post(self._config["report_url"], data=gzip.compress(jlob))
+            response = s.post(self._config["report_url"], data=content.encode("utf-8"))
+
+        # Send a gzipped report if there are too many datasets within a report
+        else:
+            s.headers.update(
+                {'Authorization': "Bearer " + self._config["auth_token"], 'Content-Type': 'application/gzip',
+                 'Accept': 'gzip', 'Content-Encoding': 'gzip'})
+
+            with open("./reports/DSR-D1-" + (datetime.strptime(end_date, '%m/%d/%Y')).strftime(
+                    '%Y-%m-%d') + "-" + node + '.json', 'r') as content_file:
+                # JSON large object data
+                jlob = content_file.read()
+
+                # JSON large object bytes
+                jlob = jlob.encode("utf-8")
+
+                with open(name + ".gzip", mode="w") as f:
+                    f.write(gzip.compress(jlob))
+
+            response = s.post(self._config["report_url"], data=gzip.compress(jlob))
 
         return response
 
