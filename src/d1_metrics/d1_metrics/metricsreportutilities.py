@@ -59,7 +59,6 @@ class MetricsReportUtilities(object):
                 mn_list.add(identifier.text)
         return(mn_list)
 
-
     def get_created_reports(self):
         """
         Gets the reports that are created by DataONE to the DataCite HUB
@@ -67,6 +66,7 @@ class MetricsReportUtilities(object):
         :return:
         """
         mn_list = self.get_MN_List()
+        return_dict = {}
         total_sum = 0
         for i in mn_list:
             s = requests.session()
@@ -75,12 +75,10 @@ class MetricsReportUtilities(object):
 
             data = json.loads(response.text)
 
-            print()
             total_sum += data["meta"]["total"]
-            print("For the MN `" + i + "` there are",  data["meta"]["total"], "report/s sent to the HUB.")
-            self.parse_json_response(data)
+            return_dict.update(self.parse_json_response(data))
 
-        print("\n\nDataONE has sent", total_sum, "reports in total to the HUB." )
+        return  return_dict
 
     def parse_json_response(self, data):
         """
@@ -88,18 +86,23 @@ class MetricsReportUtilities(object):
         :param data: Response data
         :return:
         """
+        sent_dict = {}
         for i in data["reports"]:
             try:
-                print()
-                print("\t id :", i["id"])
-                print("\t created_by :", i["report-header"]["created-by"])
-                print("\t created :", i["report-header"]["created"])
-                print("\t reporting_period :", i["report-header"]["reporting-period"]["begin-date"] + " to "
-                                                + i["report-header"]["reporting-period"]["end-date"])
+                id = i["id"]
+                created_by = i["report-header"]["created-by"]
+                created = i["report-header"]["created"]
+                start_date = i["report-header"]["reporting-period"]["begin-date"]
+                end_date = i["report-header"]["reporting-period"]["end-date"]
+                if created_by not in sent_dict:
+                    sent_dict[created_by] = []
+                sent_dict[created_by].append(start_date)
             except KeyError as e:
                 pass
+
+        return sent_dict
 
 
 if __name__ == "__main__":
   md = MetricsReportUtilities()
-  md.get_created_reports()
+  print(md.get_created_reports())
