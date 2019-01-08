@@ -293,8 +293,9 @@ def getResolvePIDs(PIDs, solr_url=None):
   Returns:
   '''
 
-  def _fetch(url, an_id):
-    session = requests.Session()
+  def _fetch(url, an_id, sess = None):
+    if sess is None:
+      session = requests.Session()
     resMap = []
     result = []
     #always return at least this identifier
@@ -347,12 +348,13 @@ def getResolvePIDs(PIDs, solr_url=None):
     return result
 
   async def _work(pids):
+    session = requests.Session()
     with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as executor:
       loop = asyncio.get_event_loop()
       tasks = []
       for an_id in pids:
         url = _defaults(solr_url) #call here as option for RR select
-        tasks.append(loop.run_in_executor(executor, _fetch, url, an_id ))
+        tasks.append(loop.run_in_executor(executor, _fetch, url, an_id, session ))
       for response in await asyncio.gather(*tasks):
         results[ response[0] ] = response
 
