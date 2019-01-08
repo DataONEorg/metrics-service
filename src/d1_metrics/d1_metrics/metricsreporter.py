@@ -10,19 +10,22 @@ import sys
 import requests
 import json
 import urllib.request
+import logging
+import gzip
+import traceback
+from time import sleep
 from xml.etree import ElementTree
 from datetime import datetime
 from datetime import timedelta
 from urllib.parse import quote_plus
 from d1_metrics.metricselasticsearch import MetricsElasticSearch
 from d1_metrics_service import pid_resolution
+from d1_metrics.metricsreportutilities import MetricsReportUtilities
 from collections import Counter
 from dateutil.relativedelta import relativedelta
-import logging
-import gzip
 
 DEFAULT_REPORT_CONFIGURATION={
-    "report_url" : "https://api.datacite.org/reports",
+    "report_url" : "https://api.datacite.org/reports/",
     "auth_token" : "",
     "report_name" : "Dataset Master Report",
     "release" : "rd1",
@@ -69,6 +72,18 @@ class MetricsReporter(object):
         json_object = {}
         json_object["report-header"] = self.get_report_header(start_date, end_date, node)
         json_object["report-datasets"] = self.get_report_datasets(start_date, end_date, unique_pids, node)
+
+        if(len(unique_pids) > 1000):
+            report_exception = {
+                "code": 69,
+                "severity": "warning",
+                "message": "Report is compressed using gzip",
+                "help-url": "https://github.com/datacite/sashimi",
+                "data": "usage data needs to be uncompressed"
+            }
+            json_object["report-header"]["exceptions"].append(report_exception)
+
+
         with open('./reports/' + ("DSR-D1-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d'))+ "-" + node+'.json', 'w') as outfile:
             json.dump(json_object, outfile, indent=2,ensure_ascii=False)
         response = self.send_reports(start_date, end_date, node, len(unique_pids))
@@ -94,6 +109,7 @@ class MetricsReporter(object):
         report_header["created-by"] = node
         report_header["report-filters"] = []
         report_header["report-attributes"] = []
+        report_header["exceptions"] = []
 
         return (report_header)
 
@@ -336,14 +352,47 @@ class MetricsReporter(object):
         metrics_elastic_search.connect()
         report_datasets = []
         pid_list = []
-
-
+        # resolved pids dictionary for entire unique_pids list
+        PIDDict = {}
+        current_resolve_count = 0
+        total_resolve_count = 0
+        temp_pid_list = []
         count = 0
+
+
         nodeName = self.resolve_MN(node)
         self.logger.debug("Processing " + str(len(unique_pids)) + " datasets for node " + node)
+
+
+        for pid in unique_pids:
+            current_resolve_count += 1
+            total_resolve_count += 1
+            temp_pid_list.append(pid)
+            if ((current_resolve_count == 500) or (total_resolve_count == len(unique_pids))):
+                exception_count = 0
+                keep_trying = True
+
+                while ((keep_trying == True) and (exception_count < 2)):
+                    try:
+                        PIDDict.update(pid_resolution.getResolvePIDs(temp_pid_list))
+                        temp_pid_list = []
+                        current_resolve_count = 0
+                        keep_trying = False
+                    except Exception as e:
+                        keep_trying == True
+                        exception_count += 1
+                        self.logger.debug(
+                            "Try # " + str(exception_count))
+                        self.logger.error(traceback.format_exc())
+                        sleep(5)
+
+            if ((total_resolve_count % 500 == 0) or (total_resolve_count == 1) or (total_resolve_count == len(unique_pids))):
+                self.logger.debug("AsyncIO Processing " + str(total_resolve_count) + " of " + str(len(unique_pids)))
+
+
         for pid in unique_pids:
             count = count + 1
-            if((count % 100 == 0) or (count == 1) or (count == len(unique_pids))) :
+            if((count % 500 == 0) or (count == 1) or (count == len(unique_pids))) :
                 self.logger.debug(str(count) + " of "  + str(len(unique_pids)))
 
 
@@ -405,10 +454,7 @@ class MetricsReporter(object):
                 performance["period"]["end-date"] = (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
 
                 instance = []
-                pid_list = []
-                pid_list.append(pid)
-                PIDDict = pid_resolution.getResolvePIDs(pid_list)
-                pid_list = PIDDict[pid_list[0]]
+                pid_list = PIDDict[pid]
 
                 report_instances = self.generate_instances(start_date, end_date, pid_list)
 
@@ -479,7 +525,7 @@ class MetricsReporter(object):
         s = requests.session()
 
         # Send an unzipped report to the hub
-        if (report_length < 5000):
+        if (report_length < 1000):
 
             s.headers.update(
                 {'Authorization': "Bearer " + self._config["auth_token"], 'Content-Type': 'application/json',
@@ -505,7 +551,8 @@ class MetricsReporter(object):
                 # JSON large object bytes
                 jlob = jlob.encode("utf-8")
 
-                with open(name + ".gzip", mode="w") as f:
+                with open("./reports/DSR-D1-" + (datetime.strptime(end_date, '%m/%d/%Y')).strftime(
+                    '%Y-%m-%d') + "-" + node + ".gzip", mode="wb") as f:
                     f.write(gzip.compress(jlob))
 
             response = s.post(self._config["report_url"], data=gzip.compress(jlob))
@@ -533,17 +580,35 @@ class MetricsReporter(object):
         :return: None
         """
         mn_list = self.get_MN_List()
+
+        #already sent reports
+        util = MetricsReportUtilities()
+        sent_dict = {}
+        self.logger.debug(
+            "Getting previously submitted reports from DataONE")
+        sent_dict = util.get_created_reports()
+
         for node in mn_list:
-            date = datetime(2013, 1, 1)
-            stopDate = datetime(2013, 12, 31)
+            self.logger.debug("Running job for Node: " + node)
+            date = datetime(2012, 1, 1)
+            stopDate = datetime(2012, 12, 31)
 
             count = 0
             while (date.strftime('%Y-%m-%d') != stopDate.strftime('%Y-%m-%d')):
-                self.logger.debug("Running job for Node: " + node)
 
                 count = count + 1
 
-                prevDate = date + timedelta(days=1)
+                if (count == 0):
+                    prevDate = date
+                else:
+                    prevDate = date + timedelta(days=1)
+
+                sent_dates = []
+                try:
+                    sent_dates = sent_dict[node]
+                except KeyError as e:
+                    pass
+
                 date = self.last_day_of_month(prevDate)
 
                 start_date, end_date = prevDate.strftime('%m/%d/%Y'),\
@@ -552,6 +617,14 @@ class MetricsReporter(object):
                 unique_pids = self.get_unique_pids(start_date, end_date, node, doi=True)
 
                 if (len(unique_pids) > 0):
+                    if (prevDate.strftime('%Y-%m-%d') in sent_dates):
+                        self.logger.debug((prevDate.strftime('%Y-%m-%d') + " in " + str(sent_dates)))
+                        self.logger.debug(
+                            "Report already sent for: " + node + " start_date at - " + date.strftime('%Y-%m-%d'))
+                        continue
+                    else:
+                        self.logger.debug((prevDate.strftime('%Y-%m-%d') + " not in " + str(sent_dates)))
+
                     self.logger.debug("Job " + " : " + start_date + " to " + end_date)
 
                     # Uncomment me to send reports to the HUB!
