@@ -16,6 +16,8 @@ import traceback
 import asyncio
 import concurrent.futures
 import time
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 from pprint import  pprint
 from aiohttp import ClientSession
 from time import sleep
@@ -246,6 +248,7 @@ class MetricsReporter(object):
                 }
             }
         }
+
         data = metrics_elastic_search.iterate_composite_aggregations(search_query=search_body, aggregation_query = aggregation_body,\
                                                                      start_date=datetime.strptime(start_date,'%m/%d/%Y'),\
                                                                      end_date=datetime.strptime(end_date,'%m/%d/%Y'))
@@ -349,6 +352,7 @@ class MetricsReporter(object):
                             (i["key"]["country"]).lower(): i["doc_count"]
                         }
                     }
+
         return report_instances
 
 
@@ -391,23 +395,10 @@ class MetricsReporter(object):
                 while ((keep_trying == True) and (exception_count < 2)):
 
                     try:
-                        self.logger.debug("Sleeping for 1 seconds")
-                        sleep(1)
                         PIDDict.update(pid_resolution.getResolvePIDs(temp_pid_list))
                         temp_pid_list = []
                         current_resolve_count = 0
                         keep_trying = False
-
-                    except ConnectionError as ke:
-                        # For the case of max limit reached for URL requests
-                        # Sleep for some time
-                        keep_trying = True
-                        exception_count += 1
-                        self.logger.debug(
-                            "Try # " + str(exception_count))
-                        self.logger.error("Max URL requests error..")
-                        self.logger.debug("Sleeping for 5 seconds")
-                        sleep(5)
 
                     except Exception as e:
                         # any other exceptions
@@ -416,9 +407,6 @@ class MetricsReporter(object):
                         self.logger.debug(
                             "Try # " + str(exception_count))
                         self.logger.error(traceback.format_exc())
-                        self.logger.debug("Sleeping for 5 seconds")
-                        sleep(5)
-
 
             if ((total_resolve_count % 500 == 0) or (total_resolve_count == 1) or (total_resolve_count == len(unique_pids))):
                 self.logger.debug("AsyncIO processed " + str(total_resolve_count) + " out of " + str(len(unique_pids)) + " datasets.")
@@ -439,28 +427,18 @@ class MetricsReporter(object):
 
                 while ((keep_trying == True) and (exception_count < 2)):
                     try:
-                        self.logger.debug("Sleeping for 10 seconds")
-                        sleep(10)
+
                         report_datasets.extend(self.generate_report_datasets(PIDs, start_date, end_date, nodeName, node))
                         PIDs = []
                         current_generated_count = 0
                         keep_trying = False
-                    except ConnectionError as e:
-                        keep_trying = True
-                        exception_count += 1
-                        self.logger.debug(
-                            "Try # " + str(exception_count))
-                        self.logger.error("Max URL requests error..")
-                        self.logger.debug("Sleeping for 20 seconds")
-                        sleep(20)
+
                     except Exception as e:
                         keep_trying = True
                         exception_count += 1
                         self.logger.debug(
                             "Try # " + str(exception_count))
                         self.logger.error(traceback.format_exc())
-                        self.logger.debug("Sleeping for 20 seconds")
-                        sleep(20)
 
             if ((total_generated_count % 500 == 0) or (total_generated_count == 1) or (total_generated_count == len(unique_pids))):
                 self.logger.debug("AsyncIO Generating Instance " + str(total_generated_count) + " of " + str(len(unique_pids)))
@@ -479,7 +457,7 @@ class MetricsReporter(object):
         :return: List of dataset objects in SUHSI format
         """
 
-        def _fetch(self, pid, start_date, end_date, nodeName, node):
+        def _fetch(self, query_url, pid, start_date, end_date, nodeName, node, sess = None):
             """
             This method forms a dataset object using the metadata retreived from multiple sources (SOLR and ES)
             for a single pid
@@ -492,7 +470,7 @@ class MetricsReporter(object):
             """
 
             dataset = {}
-            solr_response = self.query_solr(pid)
+            solr_response = self.query_solr(pid, query_url, sess = sess)
 
             if (solr_response["response"]["numFound"] > 0):
 
@@ -605,20 +583,28 @@ class MetricsReporter(object):
             :return: List of well formed dataset objects for every unique pid passed via the pids list
             """
 
+            session = requests.Session()
+            retry = Retry(connect=3, backoff_factor=0.5)
+            adapter = HTTPAdapter(max_retries=retry)
+            session.mount('https://', adapter)
+
             with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as executor:
 
                 loop = asyncio.get_event_loop()
                 tasks = []
 
+                fetch_count = 0
                 for an_id in pids:
-                    url = self._config["solr_query_url"] #call here as option for RR select
-                    tasks.append(loop.run_in_executor(executor, _fetch, self, an_id, start_date, end_date, nodeName, node ))
+                    fetch_count += 1
+                    query_url = self.solr_round_robin(fetch_count)
+                    tasks.append(loop.run_in_executor(executor, _fetch, self, query_url, an_id, start_date, end_date, nodeName, node, session ))
 
                 for response in await asyncio.gather(*tasks):
                     results.append(response)
 
         results = []
         t_start = time.time()
+
         self.logger.debug("Entering _work")
 
         # In a multithreading environment such as under gunicorn, the new thread created by
@@ -702,15 +688,22 @@ class MetricsReporter(object):
         return response
 
 
-    def query_solr(self, PID):
+    def query_solr(self, PID, query_url = None, sess = None):
         """
         Queries the Solr end-point for metadata given the PID.
         :param PID: The dataset identifier used to retreive the metadata
+        :param query_url: The url used to query the solr index
+        :param sess: Requests's session
         :return: JSON Object containing the metadata fields queried from Solr
         """
+        if sess is None:
+            self.logger.info("Session is null!")
+            sess = requests.Session()
 
         queryString = 'q=id:"' + PID + '"&fl=origin,title,datePublished,dateUploaded,authoritativeMN,dataUrl&wt=json'
-        response = requests.get(url = self._config["solr_query_url"], params = queryString)
+        if query_url is None:
+            query_url = self._config["solr_query_url"]
+        response = sess.get(url = query_url, params = queryString)
 
         return response.json()
 
@@ -740,7 +733,7 @@ class MetricsReporter(object):
 
                 count = count + 1
 
-                if (date.month == 1):
+                if (date.month == 1 or count == 1):
                     prevDate = date
                 else:
                     prevDate = date + timedelta(days=1)
@@ -814,6 +807,20 @@ class MetricsReporter(object):
             if (node_type == "mn"):
                 mn_list.add(identifier.text)
         return(mn_list)
+
+    def solr_round_robin(self, iter_count):
+        """
+        Round robin implementation to distribute jobs events within the number of solr instances
+        :param iter_count: The iteration count for the job to determine which solr instance to query
+        :return:
+        """
+        solr_instances = []
+        solr_instances.append(self._config["solr_query_url"])
+        solr_instances.append(self._config["solr_query_url_2"])
+        solr_instances.append(self._config["solr_query_url_3"])
+
+
+        return solr_instances[iter_count % len(solr_instances)]
 
 
 if __name__ == "__main__":
