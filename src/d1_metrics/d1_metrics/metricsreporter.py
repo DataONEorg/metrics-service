@@ -13,6 +13,11 @@ import urllib.request
 import logging
 import gzip
 import traceback
+import asyncio
+import concurrent.futures
+import time
+from pprint import  pprint
+from aiohttp import ClientSession
 from time import sleep
 from xml.etree import ElementTree
 from datetime import datetime
@@ -30,9 +35,11 @@ DEFAULT_REPORT_CONFIGURATION={
     "report_name" : "Dataset Master Report",
     "release" : "rd1",
     "created_by" : "DataONE",
-    "solr_query_url": "https://cn.dataone.org/cn/v2/query/solr/"
+    "solr_query_url": "https://cn.dataone.org/cn/v2/query/solr/",
+    "solr_query_url_2" : "	https://cn-unm-1.dataone.org/cn/v2/query/solr/",
+    "solr_query_url_3" : "	https://cn-orc-1.dataone.org/cn/v2/query/solr/"
 }
-
+CONCURRENT_REQUESTS = 20
 
 class MetricsReporter(object):
 
@@ -73,6 +80,8 @@ class MetricsReporter(object):
         json_object["report-header"] = self.get_report_header(start_date, end_date, node)
         json_object["report-datasets"] = self.get_report_datasets(start_date, end_date, unique_pids, node)
 
+        # adding gzip specific exceptions
+        # as we'll be sending gzipped reports if the contents had more than a 1000 datasets
         if(len(unique_pids) > 1000):
             report_exception = {
                 "code": 69,
@@ -84,9 +93,13 @@ class MetricsReporter(object):
             json_object["report-header"]["exceptions"].append(report_exception)
 
 
+        # Creating a JSON file
         with open('./reports/' + ("DSR-D1-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d'))+ "-" + node+'.json', 'w') as outfile:
             json.dump(json_object, outfile, indent=2,ensure_ascii=False)
+
+        # Sending reports to the HUB
         response = self.send_reports(start_date, end_date, node, len(unique_pids))
+
         return response
 
 
@@ -97,6 +110,7 @@ class MetricsReporter(object):
         :param end_date:
         :return: Dictionary report header object.
         """
+        # Forming the report_header object
         report_header = {}
         report_header["report-name"] = self._config["report_name"]
         report_header["report-id"] = "dsr"
@@ -236,7 +250,7 @@ class MetricsReporter(object):
                                                                      start_date=datetime.strptime(start_date,'%m/%d/%Y'),\
                                                                      end_date=datetime.strptime(end_date,'%m/%d/%Y'))
 
-
+        # Parsing Elastic Search aggregation results
         for i in data["aggregations"]["pid_list"]["buckets"]:
             if(i["key"]["format"] == "METADATA"):
                 if "METADATA" in report_instances:
@@ -338,7 +352,6 @@ class MetricsReporter(object):
         return report_instances
 
 
-
     def get_report_datasets(self, start_date, end_date, unique_pids, node ):
         """
 
@@ -352,8 +365,10 @@ class MetricsReporter(object):
         metrics_elastic_search.connect()
         report_datasets = []
         pid_list = []
+
         # resolved pids dictionary for entire unique_pids list
         PIDDict = {}
+
         current_resolve_count = 0
         total_resolve_count = 0
         temp_pid_list = []
@@ -363,42 +378,123 @@ class MetricsReporter(object):
         nodeName = self.resolve_MN(node)
         self.logger.debug("Processing " + str(len(unique_pids)) + " datasets for node " + node)
 
-
         for pid in unique_pids:
             current_resolve_count += 1
             total_resolve_count += 1
             temp_pid_list.append(pid)
+
             if ((current_resolve_count == 500) or (total_resolve_count == len(unique_pids))):
+                # create
+                exception_count = 0
+                keep_trying = True
+
+                while ((keep_trying == True) and (exception_count < 2)):
+
+                    try:
+                        self.logger.debug("Sleeping for 1 seconds")
+                        sleep(1)
+                        PIDDict.update(pid_resolution.getResolvePIDs(temp_pid_list))
+                        temp_pid_list = []
+                        current_resolve_count = 0
+                        keep_trying = False
+
+                    except ConnectionError as ke:
+                        # For the case of max limit reached for URL requests
+                        # Sleep for some time
+                        keep_trying = True
+                        exception_count += 1
+                        self.logger.debug(
+                            "Try # " + str(exception_count))
+                        self.logger.error("Max URL requests error..")
+                        self.logger.debug("Sleeping for 5 seconds")
+                        sleep(5)
+
+                    except Exception as e:
+                        # any other exceptions
+                        keep_trying = True
+                        exception_count += 1
+                        self.logger.debug(
+                            "Try # " + str(exception_count))
+                        self.logger.error(traceback.format_exc())
+                        self.logger.debug("Sleeping for 5 seconds")
+                        sleep(5)
+
+
+            if ((total_resolve_count % 500 == 0) or (total_resolve_count == 1) or (total_resolve_count == len(unique_pids))):
+                self.logger.debug("AsyncIO processed " + str(total_resolve_count) + " out of " + str(len(unique_pids)) + " datasets.")
+
+        self.PIDDict = PIDDict
+
+        PIDs = []
+        current_generated_count = 0
+        total_generated_count = 0
+        count = 0
+        for pid in unique_pids:
+            current_generated_count += 1
+            total_generated_count += 1
+            PIDs.append(pid)
+            if ((current_generated_count % 500 == 0) or (total_generated_count == len(unique_pids))):
                 exception_count = 0
                 keep_trying = True
 
                 while ((keep_trying == True) and (exception_count < 2)):
                     try:
-                        PIDDict.update(pid_resolution.getResolvePIDs(temp_pid_list))
-                        temp_pid_list = []
-                        current_resolve_count = 0
+                        self.logger.debug("Sleeping for 10 seconds")
+                        sleep(10)
+                        report_datasets.extend(self.generate_report_datasets(PIDs, start_date, end_date, nodeName, node))
+                        PIDs = []
+                        current_generated_count = 0
                         keep_trying = False
+                    except ConnectionError as e:
+                        keep_trying = True
+                        exception_count += 1
+                        self.logger.debug(
+                            "Try # " + str(exception_count))
+                        self.logger.error("Max URL requests error..")
+                        self.logger.debug("Sleeping for 20 seconds")
+                        sleep(20)
                     except Exception as e:
-                        keep_trying == True
+                        keep_trying = True
                         exception_count += 1
                         self.logger.debug(
                             "Try # " + str(exception_count))
                         self.logger.error(traceback.format_exc())
-                        sleep(5)
+                        self.logger.debug("Sleeping for 20 seconds")
+                        sleep(20)
 
-            if ((total_resolve_count % 500 == 0) or (total_resolve_count == 1) or (total_resolve_count == len(unique_pids))):
-                self.logger.debug("AsyncIO Processing " + str(total_resolve_count) + " of " + str(len(unique_pids)))
+            if ((total_generated_count % 500 == 0) or (total_generated_count == 1) or (total_generated_count == len(unique_pids))):
+                self.logger.debug("AsyncIO Generating Instance " + str(total_generated_count) + " of " + str(len(unique_pids)))
+
+        return (report_datasets)
 
 
-        for pid in unique_pids:
-            count = count + 1
-            if((count % 500 == 0) or (count == 1) or (count == len(unique_pids))) :
-                self.logger.debug(str(count) + " of "  + str(len(unique_pids)))
+    def generate_report_datasets(self, PIDs, start_date, end_date, nodeName, node):
+        """
+        Given a  set of unique dataset identifiers- this method generates dataset instances asynchronously
+        :param PIDs: Unique list of dataset identifiers
+        :param start_date: Begin date of the report
+        :param end_date: End date of the report
+        :param nodeName: Resolved name of the node that reported this dataset read event
+        :param node: Identifier of the node that reported this dataset read event
+        :return: List of dataset objects in SUHSI format
+        """
 
+        def _fetch(self, pid, start_date, end_date, nodeName, node):
+            """
+            This method forms a dataset object using the metadata retreived from multiple sources (SOLR and ES)
+            for a single pid
+            :param PIDs: Unique list of dataset identifiers
+            :param start_date: Begin date of the report
+            :param end_date: End date of the report
+            :param nodeName: Resolved name of the node that reported this dataset read event
+            :param node: Identifier of the node that reported this dataset read event
+            :return: A well formatted dataset object to be included in the report
+            """
 
             dataset = {}
             solr_response = self.query_solr(pid)
-            if(solr_response["response"]["numFound"] > 0):
+
+            if (solr_response["response"]["numFound"] > 0):
 
                 if ("title" in (i for i in solr_response["response"]["docs"][0])):
                     dataset["dataset-title"] = solr_response["response"]["docs"][0]["title"]
@@ -413,7 +509,8 @@ class MetricsReporter(object):
 
                 if ("authoritativeMN" in (i for i in solr_response["response"]["docs"][0])):
                     dataset["publisher-id"] = []
-                    dataset["publisher-id"].append({"type":"urn", "value" :solr_response["response"]["docs"][0]["authoritativeMN"]})
+                    dataset["publisher-id"].append(
+                        {"type": "urn", "value": solr_response["response"]["docs"][0]["authoritativeMN"]})
                 else:
                     dataset["publisher-id"].append(
                         {"type": "urn", "value": node})
@@ -428,15 +525,17 @@ class MetricsReporter(object):
 
                 if ("datePublished" in (i for i in solr_response["response"]["docs"][0])):
                     dataset["dataset-dates"] = []
-                    dataset["dataset-dates"].append({"type": "pub-date", "value" :solr_response["response"]["docs"][0]["datePublished"][:10]})
+                    dataset["dataset-dates"].append(
+                        {"type": "pub-date", "value": solr_response["response"]["docs"][0]["datePublished"][:10]})
                 else:
                     dataset["dataset-dates"] = []
-                    dataset["dataset-dates"].append({"type": "pub-date", "value" :solr_response["response"]["docs"][0]["dateUploaded"][:10]})
+                    dataset["dataset-dates"].append(
+                        {"type": "pub-date", "value": solr_response["response"]["docs"][0]["dateUploaded"][:10]})
 
                 if "doi" in pid:
                     dataset["dataset-id"] = [{"type": "doi", "value": pid}]
                 else:
-                    continue
+                    return {}
                     # dataset["dataset-id"] = [{"type": "other-id", "value": pid}]
 
                 dataset["yop"] = dataset["dataset-dates"][0]["value"][:4]
@@ -450,11 +549,11 @@ class MetricsReporter(object):
                 performance = {}
 
                 performance["period"] = {}
-                performance["period"]["begin-date"] = (datetime.strptime(start_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
-                performance["period"]["end-date"] = (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
+                performance["period"]["begin-date"] = (datetime.strptime(start_date, '%m/%d/%Y')).strftime('%Y-%m-%d')
+                performance["period"]["end-date"] = (datetime.strptime(end_date, '%m/%d/%Y')).strftime('%Y-%m-%d')
 
                 instance = []
-                pid_list = PIDDict[pid]
+                pid_list = self.PIDDict[pid]
 
                 report_instances = self.generate_instances(start_date, end_date, pid_list)
 
@@ -462,17 +561,18 @@ class MetricsReporter(object):
                     total_dataset_investigation = {"count": report_instances["METADATA"]["total_investigations"],
                                                    "access-method": "regular",
                                                    "metric-type": "total-dataset-investigations",
-                                                   "country-counts": report_instances["METADATA"]["country_total_investigations"]}
+                                                   "country-counts": report_instances["METADATA"][
+                                                       "country_total_investigations"]}
 
                     unique_dataset_investigation = {"count": report_instances["METADATA"]["unique_investigations"],
                                                     "access-method": "regular",
                                                     "metric-type": "unique-dataset-investigations",
-                                                    "country-counts": report_instances["METADATA"]["country_unique_investigations"]}
+                                                    "country-counts": report_instances["METADATA"][
+                                                        "country_unique_investigations"]}
                     instance.append(total_dataset_investigation)
                     instance.append(unique_dataset_investigation)
 
-
-                if("DATA" in report_instances):
+                if ("DATA" in report_instances):
                     total_dataset_requests = {"count": report_instances["DATA"]["total_requests"],
                                               "access-method": "regular",
                                               "metric-type": "total-dataset-requests",
@@ -490,11 +590,53 @@ class MetricsReporter(object):
                 dataset["performance"].append(performance)
 
             else:
-                continue
+                pass
 
-            report_datasets.append(dataset)
+            return dataset
 
-        return (report_datasets)
+        async def _work(self, pids, start_date, end_date, nodeName, node):
+            """
+            Given a set of unique identifiers schedules asynchronous jobs to retreive metadata
+            :param pids: set of unique identifiers
+            :param start_date: Begin date of the report
+            :param end_date: End date of the report
+            :param nodeName: Resolved name of the node that reported this dataset read event
+            :param node: Identifier of the node that reported this dataset read event
+            :return: List of well formed dataset objects for every unique pid passed via the pids list
+            """
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as executor:
+
+                loop = asyncio.get_event_loop()
+                tasks = []
+
+                for an_id in pids:
+                    url = self._config["solr_query_url"] #call here as option for RR select
+                    tasks.append(loop.run_in_executor(executor, _fetch, self, an_id, start_date, end_date, nodeName, node ))
+
+                for response in await asyncio.gather(*tasks):
+                    results.append(response)
+
+        results = []
+        t_start = time.time()
+        self.logger.debug("Entering _work")
+
+        # In a multithreading environment such as under gunicorn, the new thread created by
+        # gevent may not provide an event loop. Create a new one if necessary.
+        try:
+            loop = asyncio.get_event_loop()
+
+        except RuntimeError as e:
+            self.logger.info("Creating new event loop.")
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        future = asyncio.ensure_future(_work(self, PIDs, start_date, end_date, nodeName, node))
+        loop.run_until_complete(future)
+
+        self.logger.debug("elapsed:%fsec", time.time() - t_start)
+
+        return results
 
 
     def resolve_MN(self, authoritativeMN):
@@ -541,7 +683,7 @@ class MetricsReporter(object):
         else:
             s.headers.update(
                 {'Authorization': "Bearer " + self._config["auth_token"], 'Content-Type': 'application/gzip',
-                 'Accept': 'gzip', 'Content-Encoding': 'gzip'})
+                 'Accept': 'application/gzip', 'Content-Encoding': 'gzip'})
 
             with open("./reports/DSR-D1-" + (datetime.strptime(end_date, '%m/%d/%Y')).strftime(
                     '%Y-%m-%d') + "-" + node + '.json', 'r') as content_file:
@@ -590,15 +732,15 @@ class MetricsReporter(object):
 
         for node in mn_list:
             self.logger.debug("Running job for Node: " + node)
-            date = datetime(2012, 1, 1)
-            stopDate = datetime(2012, 12, 31)
+            date = datetime(2015, 1, 1)
+            stopDate = datetime(2015, 12, 31)
 
             count = 0
             while (date.strftime('%Y-%m-%d') != stopDate.strftime('%Y-%m-%d')):
 
                 count = count + 1
 
-                if (count == 0):
+                if (date.month == 1):
                     prevDate = date
                 else:
                     prevDate = date + timedelta(days=1)
@@ -616,7 +758,7 @@ class MetricsReporter(object):
 
                 unique_pids = self.get_unique_pids(start_date, end_date, node, doi=True)
 
-                if (len(unique_pids) > 0):
+                if (len(unique_pids) > 0 and len(unique_pids) < 50000):
                     if (prevDate.strftime('%Y-%m-%d') in sent_dates):
                         self.logger.debug((prevDate.strftime('%Y-%m-%d') + " in " + str(sent_dates)))
                         self.logger.debug(
@@ -635,10 +777,6 @@ class MetricsReporter(object):
                     self.logger.debug(logentry)
 
                     if response.status_code != 201:
-
-                        logentry = "Node " + node + " : " + start_date + " to " + end_date + " === " \
-                                   + str(response.status_code)
-                        self.logger.error(logentry)
                         self.logger.error(str(response.status_code) + " " + response.reason)
                         self.logger.error("Headers: " + str(response.headers))
                         self.logger.error("Content: " + str((response.content).decode("utf-8")))
@@ -662,7 +800,7 @@ class MetricsReporter(object):
 
     def get_MN_List(self):
         """
-        Retreives a MN idenifier from the https://cn.dataone.org/cn/v2/node/ endpoint
+        Retreives a MN idenifiers from the https://cn.dataone.org/cn/v2/node/ endpoint
         Used to send the reports for different MNs
         :return: Set of Member Node identifiers
         """
@@ -686,5 +824,5 @@ if __name__ == "__main__":
   # md.query_solr("df35b.302.1")
   # md.report_handler("05/01/2018", "05/30/2018")
   # md.get_unique_pids("05/01/2018", "05/31/2018")
-  md.scheduler()
   # md.resolvePIDs(["doi:10.18739/A2X65H"])
+  md.scheduler()
