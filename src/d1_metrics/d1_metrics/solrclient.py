@@ -91,9 +91,8 @@ class SolrSearchResponseIterator(SolrClient):
   """Performs a search against a Solr index and acts as an iterator to retrieve
   all the values."""
 
-  def __init__(self, select_url, q, fq=None, fields='*', page_size=PAGE_SIZE, max_records=None, sort=None, **query_args):
-    super(SolrSearchResponseIterator, self).__init__()
-    self.select_utl = select_url
+  def __init__(self, base_url, core_name, q, select="select", fq=None, fields='*', page_size=PAGE_SIZE, max_records=None, sort=None, **query_args):
+    super(SolrSearchResponseIterator, self).__init__(base_url, core_name, select=select)
     self.q = q
     self.fq = fq
     self.fields = fields
@@ -119,7 +118,7 @@ class SolrSearchResponseIterator(SolrClient):
     page_size = self.page_size
     if (offset + page_size) > self.max_records:
       page_size = self.max_records - offset
-    query_dict = {
+    params = {
       'q': self.q,
       'start': str(offset),
       'rows': str(page_size),
@@ -127,13 +126,13 @@ class SolrSearchResponseIterator(SolrClient):
       'wt': 'json',
     }
     if self.fq is not None:
-      query_dict['fq'] = self.fq
+      params['fq'] = self.fq
     if self.sort is not None:
-      query_dict['sort'] = self.sort
-    params = urllib.parse.urlencode(query_dict) #, quote_via=urllib.parse.quote)
+      params['sort'] = self.sort
+    #params = urllib.parse.urlencode(query_dict) #, quote_via=urllib.parse.quote)
     self.logger.debug("request params = %s", str(params))
-    response = self.client.get(self.select_utl, params=params)
-    self.res = json.loads(response.text)
+    self.res = self.doGet(params=params)
+    #self.res = json.loads(response.text)
     self._num_hits = int(self.res['response']['numFound'])
     end_time = time.time()
     self.logger.debug("Page loaded in %.4f seconds.", end_time - start_time)
