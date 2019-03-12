@@ -109,7 +109,7 @@ class SolrSearchResponseIterator(SolrClient):
     self._next_page(self.c_record)
     self._num_hits = 0
     if self.res['response']['numFound'] > 1000:
-      self.logger.warn("Retrieving %d records...", self.res['response']['numFound'])
+      self.logger.warning("Retrieving %d records...", self.res['response']['numFound'])
 
 
   def _next_page(self, offset):
