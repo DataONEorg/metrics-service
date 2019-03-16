@@ -20,7 +20,9 @@ import re
 import json
 import solrclient
 import datetime
-from d1_metrics_service import pid_resolution
+import asyncio
+import concurrent.futures
+import requests
 
 APP_LOG = "app"
 DATA_LOG = "dataset"
@@ -31,6 +33,8 @@ LOGMATCH_PATTERN = '^{'
 SOLR_BASE_URL = "http://localhost:8983/solr"
 SOLR_CORE = "search_core"
 SOLR_SELECT = "/select/"
+
+CONCURRENT_REQUESTS = 20  #max number of concurrent requests to run
 
 DEFAULT_RECORD_DEST = "dataset_info.log"
 
@@ -57,6 +61,184 @@ ZERO = datetime.timedelta(0)
 
 BATCH_TDELTA_PERIOD = datetime.timedelta(days=10)
 
+
+#==========
+
+def quoteTerm(term):
+  '''
+  Return a quoted, escaped Solr query term
+  Args:
+    term: (string) term to be escaped and quoted
+
+  Returns: (string) quoted, escaped term
+  '''
+  return '"' + solrclient.escapeSolrQueryTerm(term) + '"'
+
+def _getIdsFromSolrResponse(response_text, pids=[]):
+  '''
+  Helper to retrieve identifiers from the solr response
+
+  Args:
+    response_text: The solr response json text.
+    pids: A list of identifiers to which identifiers here are added
+
+  Returns: pids with any additional identifiers appended.
+  '''
+  data = json.loads(response_text)
+  for doc in data['response']['docs']:
+    try:
+      pid = doc['id']
+      if not pid in pids:
+        pids.append(pid)
+    except KeyError as e:
+      pass
+    try:
+      for pid in doc['documents']:
+        if not pid in pids:
+          pids.append(pid)
+    except KeyError as e:
+      pass
+    try:
+      pid = doc['obsoletes']
+      if not pid in pids:
+        pids.append(pid)
+    except KeyError as e:
+      pass
+    try:
+      for pid in doc['resourceMap']:
+        if not pid in pids:
+          pids.append(pid)
+    except KeyError as e:
+      pass
+  return pids
+
+
+def getResolvePIDs(PIDs, solr_url, use_mm_params=True):
+  '''
+  Implements same functionality as metricsreader.resolvePIDs, except works asynchronously for input pids
+
+  input: ["urn:uuid:f46dafac-91e4-4f5f-aaff-b53eab9fe863", ]
+  output: {"urn:uuid:f46dafac-91e4-4f5f-aaff-b53eab9fe863": ["urn:uuid:f46dafac-91e4-4f5f-aaff-b53eab9fe863",
+                                                             "knb.92123.1",
+                                                             "urn:uuid:d64e5f8b-c91c-487a-8ce7-0cd271194f34",
+                                                             "urn:uuid:bb01b2c8-5e6c-4645-903d-39dbdd8d4d56",
+                                                             "urn:uuid:d80dc5c2-bfd7-4023-87a3-9e47a2c57fbb",
+                                                             "urn:uuid:9609acb1-63f2-40c6-88e3-ca9a16b06c79",
+                                                             "urn:uuid:542141d3-ed5a-4d97-b759-28a17757b0b8",
+                                                             "urn:uuid:22ef5022-8ade-4549-acac-c18656dd2033",
+                                                             "urn:uuid:2cdf8adb-79c4-4b6c-875a-3e459c3817c7"],
+          }
+  Args:
+    PIDs:
+    solr_url:
+
+  Returns:
+  '''
+
+  def _doPost(session, url, params, use_mm=True):
+    """
+    Post a request, using mime-multipart or not. This is necessary because
+    calling solr on the local address on the CN bypasses the CN service interface which
+    uses mime-multipart requests.
+
+    Args:
+      session: Session instance
+      url: URL for request
+      params: params configure for mime-multipart request
+      use_mm: if not true, then a form request is made.
+
+    Returns: response object
+    """
+    if use_mm:
+      return session.post(url, files=params)
+    paramsd = {key:value[1] for (key,value) in params.items()}
+    # This is necessary because the default query is set by the DataONE SOLR connector
+    # which is used when accessing solr through the public interface.
+    if not 'q' in paramsd:
+      paramsd['q'] = "*:*"
+    return session.post(url, data=paramsd)
+
+
+  def _fetch(url, an_id):
+    session = requests.Session()
+    resMap = []
+    result = []
+    #always return at least this identifier
+    result.append(an_id)
+    params = {'wt':(None,'json'),
+              'fl':(None,'documents,resourceMap'),
+              'rows':(None,1000)
+              }
+    params['fq'] = (None,"((id:" + quoteTerm(an_id) + ") OR (seriesId:" + quoteTerm(an_id) + "))")
+    response = _doPost(session, url, params, use_mm=use_mm_params)
+    if response.status_code == requests.codes.ok:
+      #continue
+      logging.debug(response.text)
+      resMap = _getIdsFromSolrResponse(response.text,resMap)
+      more_resMap_work = True
+      params['fl'] = (None,'documents,obsoletes')
+
+      while more_resMap_work:
+        current_length = len(resMap)
+        query = ") OR (".join(map(quoteTerm, resMap))
+        params['fq'] = (None,"id:((" + query + "))")
+        response = _doPost(session, url, params, use_mm=use_mm_params)
+        if response.status_code == requests.codes.ok:
+          resMap = _getIdsFromSolrResponse(response.text, resMap)
+          if len(resMap) == current_length:
+            more_resMap_work = False
+        else:
+          more_resMap_work = False
+
+      params['fl'] = (None,'id,documents,obsoletes')
+      query = ") OR (".join(map(quoteTerm, resMap))
+      params['fq'] = (None,"resourceMap:((" + query + "))")
+      response = _doPost(session, url, params, use_mm=use_mm_params)
+      if response.status_code == requests.codes.ok:
+        result = _getIdsFromSolrResponse(response.text, result)
+
+      more_work = True
+      while more_work:
+        current_length = len(result)
+        query = ") OR (".join( map(quoteTerm, result) )
+        params['fq'] = (None,'id:((' + query + '))')
+        response = _doPost(session, url, params, use_mm=use_mm_params)
+        if response.status_code == requests.codes.ok:
+          result = _getIdsFromSolrResponse(response.text, result)
+          if len(result) == current_length:
+            more_work = False
+        else:
+          more_work = False
+    return result
+
+  async def _work(pids):
+    with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as executor:
+      loop = asyncio.get_event_loop()
+      tasks = []
+      for an_id in pids:
+        url = solr_url #call here as option for RR select
+        tasks.append(loop.run_in_executor(executor, _fetch, url, an_id ))
+      for response in await asyncio.gather(*tasks):
+        results[ response[0] ] = response
+
+  _L = logging.getLogger(APP_LOG)
+  results = {}
+  _L.debug("Enter")
+  # In a multithreading environment such as under gunicorn, the new thread created by
+  # gevent may not provide an event loop. Create a new one if necessary.
+  try:
+    loop = asyncio.get_event_loop()
+  except RuntimeError as e:
+    _L.info("Creating new event loop.")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+  future = asyncio.ensure_future(_work(PIDs))
+  loop.run_until_complete( future )
+  return results
+
+
+#==========
 
 class UTC(datetime.tzinfo):
     """
@@ -85,17 +267,18 @@ class AppLogFormatter(logging.Formatter):
 
 
 def setupLogger(level=logging.INFO):
-    logger = logging.getLogger()
-    for handler in logger.handlers:
-        logger.removeHandler(handler)
-    logger.setLevel(level)
-    formatter = AppLogFormatter(fmt='%(asctime)s %(name)s %(levelname)s: %(message)s',
-                             datefmt='%Y%m%dT%H%M%S.%f%z')
     logger = logging.getLogger(APP_LOG)
-    l2 = logging.StreamHandler()
-    l2.setFormatter(formatter)
-    l2.setLevel(level)
-    logger.addHandler(l2)
+    logger.setLevel(level)
+    #for handler in logger.handlers:
+    #    logger.removeHandler(handler)
+    #logger.setLevel(level)
+    #formatter = AppLogFormatter(fmt='%(asctime)s %(name)s %(levelname)s: %(message)s',
+    #                         datefmt='%Y%m%dT%H%M%S.%f%z')
+    #logger = logging.getLogger(APP_LOG)
+    #l2 = logging.StreamHandler()
+    #l2.setFormatter(formatter)
+    #l2.setLevel(level)
+    #logger.addHandler(l2)
 
 
 def getDataOutputLogger(log_file_name, log_level=logging.INFO):
@@ -340,7 +523,7 @@ def getRecords(record_file_path, start_date=None, end_date=None, test_only=True)
         results.append(res)
         batch.append(res["PID"])
         if len(batch) > batch_size:
-            resolved_pids = pid_resolution.getResolvePIDs(batch, solr_url)
+            resolved_pids = getResolvePIDs(batch, solr_url)
             for result in results:
                 result["datasetIdentifierFamily"] = resolved_pids[result["PID"]]
                 result["datasetDOIFamily"] = identifiersToDOIs(result["datasetIdentifierFamily"], result["originMN"])
@@ -353,7 +536,7 @@ def getRecords(record_file_path, start_date=None, end_date=None, test_only=True)
             L.info("Processed %d records", counter)
     # Process any remaining items
     if len(batch) > 0:
-        resolved_pids = pid_resolution.getResolvePIDs(
+        resolved_pids = getResolvePIDs(
             batch, solr_url, use_mm_params=False
         )
         for result in results:
