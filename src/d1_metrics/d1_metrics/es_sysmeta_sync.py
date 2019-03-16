@@ -18,7 +18,7 @@ import argparse
 import logging
 import re
 import json
-import solrclient
+from . import solrclient
 import datetime
 import asyncio
 import concurrent.futures
@@ -523,7 +523,7 @@ def getRecords(record_file_path, start_date=None, end_date=None, test_only=True)
         results.append(res)
         batch.append(res["PID"])
         if len(batch) > batch_size:
-            resolved_pids = getResolvePIDs(batch, solr_url)
+            resolved_pids = getResolvePIDs(batch, solr_url, use_mm_params=False)
             for result in results:
                 result["datasetIdentifierFamily"] = resolved_pids[result["PID"]]
                 result["datasetDOIFamily"] = identifiersToDOIs(result["datasetIdentifierFamily"], result["originMN"])
