@@ -26,7 +26,7 @@ import requests
 
 APP_LOG = "app"
 DATA_LOG = "dataset"
-MAX_LOGFILE_SIZE = 1_073_741_824  # 1GB
+MAX_LOGFILE_SIZE = 1073741824  # 1GB
 MAX_LOG_BACKUPS = 250  # max of about 250GB of log files stored
 LOGMATCH_PATTERN = '^{'
 
