@@ -403,6 +403,7 @@ def getPropertiesForPID(entry, solr_url):
     Returns: dictionary
     """
     res = {
+        "entryType":"sysmeta_ids",
         "PID": entry["id"],
         "SID": entry.get("seriesId", None),
         "DOIs": [],
