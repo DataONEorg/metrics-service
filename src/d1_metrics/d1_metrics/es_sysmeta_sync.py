@@ -360,6 +360,13 @@ def parseDOI(identifier, nodeId):
         epos = identifier.find("?")
         identifier = identifier[0:epos]
         doi = identifier.replace("http://dx.doi.org/","doi:")
+    elif nodeId == "urn:node:RW":
+        # 10.24431/rw1k13
+        if identifier.startswith("10.24431"):
+            doi = "doi:" + identifier
+    elif nodeId == "urn:node:IEDA_MGDL":
+        # http://doi.org/10.1594/IEDA/312247
+        doi = identifier.replace("http://doi.org/","doi:")
     else:
         if identifier.startswith("doi:"):
             doi = identifier
