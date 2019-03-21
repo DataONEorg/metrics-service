@@ -1005,6 +1005,20 @@ class MetricsElasticSearch(object):
     return aggregations
 
 
+  def getDatasetIdentifierFamily(self, search_query, index="identifiers-2", max_limit=10):
+    """
+    Based on the search_query, query the ES to get the Dataset Identifier Family
+    from the ES `identifiers` index
+    :return:
+    """
+    search_body = {}
+    counter = max_limit
+    search_body["_source"] = "datasetIdentifierFamily"
+    search_body["query"] = search_query
+    return self._getQueryResults(index, search_body, max_limit)
+
+
+
 # if __name__ == "__main__":
 #   md = MetricsElasticSearch()
 # #   # md.get_report_header("01/20/2018", "02/20/2018")
