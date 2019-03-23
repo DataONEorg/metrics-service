@@ -116,12 +116,6 @@ class MetricsReader:
                     results, resultDetails = self.getSummaryMetricsPerDataset(filter_by[0]["values"])
 
             if (filter_type == "catalog" or filter_type == "package") and interpret_as == "list":
-                if filter_type == "catalog" and n_filter_values == 1:
-                    results, resultDetails = self.getSummaryMetricsPerDataset(filter_by[0]["values"])
-
-                if filter_type == "package" and n_filter_values == 1:
-                    results, resultDetails = self.getSummaryMetricsPerCatalog(filter_by[0]["values"], filter_type)
-
                 if n_filter_values > 1:
                     #Called when browsing the search UI for example
                     results, resultDetails = self.getSummaryMetricsPerCatalog(filter_by[0]["values"], filter_type)
@@ -133,7 +127,6 @@ class MetricsReader:
         self.response["resultDetails"] = resultDetails
         self.logger.debug("exit process_request, duration=%fsec", time.time()-t_0)
         return self.response
-
 
 
     def getSummaryMetricsPerDataset(self, PIDs):
@@ -429,7 +422,6 @@ class MetricsReader:
         return (citationCount, citations)
 
 
-
     def getSummaryMetricsPerCatalog(self, requestPIDArray, a_type):
         """
         Queries the Elastic Search and retrieves the summary metrics for a given DataCatalog pid Array.
@@ -542,7 +534,6 @@ class MetricsReader:
         return (self.formatDataPerCatalog(data, catalogPIDs))
 
 
-
     def formatDataPerCatalog(self, data, catalogPIDs):
         dataCounts = {}
         metadataCounts = {}
@@ -626,7 +617,6 @@ class MetricsReader:
         return resultDict
 
 
-
     def getMetricsPerRepository(self, nodeId):
         """
         Retrieves the metrics stats per repository
@@ -650,12 +640,6 @@ class MetricsReader:
                 "term": {"event.key": "read"}
             },
             {
-                "term": {
-                    "nodeId": nodeId
-                }
-
-            },
-            {
                 "exists": {
                     "field": "sessionId"
                 }
@@ -669,6 +653,14 @@ class MetricsReader:
                 }
             }
         ]
+
+        if nodeId != "urn:node:CN":
+            nodeTermQuery = {
+                "term": {
+                    "nodeId": nodeId
+                }
+            },
+            search_body.append(nodeTermQuery)
 
         aggregation_body = {
             "pid_list": {
@@ -712,7 +704,6 @@ class MetricsReader:
         t_delta = time.time() - t_start
         self.logger.debug('getMetricsPerRepository:t3=%.4f', t_delta)
         return (self.formatMetricsPerRepository(data, nodeId, start_date, end_date))
-
 
 
     def formatMetricsPerRepository(self, data, nodeId, start_date, end_date):
@@ -782,8 +773,6 @@ class MetricsReader:
 
         return results, resultDetails
 
-
-
     def getRepositoryCitationPIDs(self, nodeId):
         """
 
@@ -795,7 +784,10 @@ class MetricsReader:
         metrics_database = MetricsDatabase()
         metrics_database.connect()
         csr = metrics_database.getCursor()
-        sql = 'SELECT target_id FROM citation_metadata WHERE \''+ nodeId +'\' = ANY (node_id);'
+        if nodeId == "urn:node:CN":
+            sql = 'SELECT target_id FROM citation_metadata;'
+        else:
+            sql = 'SELECT target_id FROM citation_metadata WHERE \''+ nodeId +'\' = ANY (node_id);'
 
         results = []
         citationCount = 0
@@ -838,8 +830,6 @@ class MetricsReader:
 
 
 
-
 if __name__ == "__main__":
     mr = MetricsReader()
-    # mr.getRepositoryCitationPIDs('urn:node:ARCTIC')
     mr.resolvePIDs(["doi:10.5065/D6BG2KW9"])
