@@ -123,6 +123,10 @@ class MetricsReader:
             if (filter_type == "repository") and interpret_as == "list":
                 results, resultDetails = self.getMetricsPerRepository(filter_by[0]["values"][0])
 
+            if (filter_type == "user") and interpret_as == "list":
+                    # Called when generating metrics for a specific user
+                    results, resultDetails = self.getMetricsPerUser(filter_by[0]["values"])
+
         self.response["results"] = results
         self.response["resultDetails"] = resultDetails
         self.logger.debug("exit process_request, duration=%fsec", time.time()-t_0)
@@ -773,6 +777,7 @@ class MetricsReader:
 
         return results, resultDetails
 
+
     def getRepositoryCitationPIDs(self, nodeId):
         """
 
@@ -829,7 +834,195 @@ class MetricsReader:
       return term
 
 
+    def getMetricsPerUser(self, requestPIDArray):
+        """
+            Retrieves the metrics stats per user
+            Uses set of dataset identifiers as userID for now
+            :param: requestPIDArray - set of dataset identifiers that belongs to the user
+            :return:
+                Formatted Metrics Resonse object in JSON format
+        """
+
+        # Basic init for required objects
+        t_start = time.time()
+        metrics_elastic_search = MetricsElasticSearch()
+        metrics_elastic_search.connect()
+
+        t_delta = time.time() - t_start
+        self.logger.debug('getMetricsPerUser:t1=%.4f', t_delta)
+
+        userPIDs = {}
+        combinedPIDs = []
+        for i in requestPIDArray:
+            if i not in userPIDs:
+                userPIDs[i] = []
+                userPIDs[i].append(i)
+
+        self.userPIDs = userPIDs
+
+        t_resolve_start = time.time() - t_start
+
+        return_dict = {}
+        return_dict = pid_resolution.getResolvePIDs(userPIDs)
+
+        t_resolve_end = time.time() - t_start
+
+        for i in userPIDs:
+            userPIDs[i] = return_dict[i]
+
+        for i in userPIDs:
+            combinedPIDs.extend(userPIDs[i])
+
+        if (len(self.response["metricsRequest"]["filterBy"]) > 1):
+            if (self.response["metricsRequest"]["filterBy"][1]["filterType"] == "month" and
+                        self.response["metricsRequest"]["filterBy"][1]["interpretAs"] == "range"):
+                start_date = self.response["metricsRequest"]["filterBy"][1]["values"][0]
+            else:
+                start_date = "01/01/2012"
+        else:
+            start_date = "01/01/2012"
+        end_date = datetime.today().strftime('%m/%d/%Y')
+
+
+        # Setting the query for the user profile
+        metrics_elastic_search = MetricsElasticSearch()
+        metrics_elastic_search.connect()
+        search_body = [
+            {
+                "term": {"event.key": "read"}
+            },
+            {
+                "terms": {
+                    "pid.key": combinedPIDs
+                }
+
+            },
+            {
+                "exists": {
+                    "field": "sessionId"
+                }
+            },
+            {
+                "terms": {
+                    "formatType": [
+                        "DATA",
+                        "METADATA"
+                    ]
+                }
+            }
+        ]
+        aggregation_body = {
+            "pid_list": {
+                "composite": {
+                    "sources": [
+                        {
+                            "format": {
+                                "terms": {
+                                    "field": "formatType"
+                                }
+                            }
+                        },
+                        {
+                            "month": {
+                                "date_histogram": {
+                                    "field": "dateLogged",
+                                    "interval": "month"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+
+        t_delta = time.time() - t_start
+        self.logger.debug('getMetricsPerUser:t2=%.4f', t_delta)
+
+        t_es_start = time.time() - t_start
+
+        data = metrics_elastic_search.iterate_composite_aggregations(search_query=search_body,
+                                                                     aggregation_query=aggregation_body,
+                                                                     start_date=datetime.strptime(start_date,
+                                                                                                  '%m/%d/%Y'),
+                                                                     end_date=datetime.strptime(end_date, '%m/%d/%Y'))
+
+        t_es_end = time.time() - t_start
+
+        self.response["resolve_time"] = t_resolve_end - t_resolve_start
+        self.response["es_time"] = t_es_end - t_es_start
+
+        return (self.formatDataPerUser(data, combinedPIDs, start_date, end_date))
+
+
+    def formatDataPerUser(self, data, citation_pids, start_date, end_date):
+        """
+        Formats the results retrieved from the Elastic Search and returns it as a HTTP response
+        :param data: the data retrieve from ES
+        :param citation_pids: PIDS to check the corresponding citations for
+        :param start_date: begin date range for the results
+        :param end_date: end date range for the results
+        :return:
+            A tuple of formatted JSON response objects containing the metrics corresponding metadata.
+        """
+        results = {
+            "months": [],
+            "downloads": [],
+            "views": [],
+            "citations": [],
+        }
+
+        # Getting the months between the two given dates:
+        start = datetime.strptime(start_date, "%m/%d/%Y")
+        end = datetime.strptime(end_date, "%m/%d/%Y")
+
+        # Getting a list of all the months possible for the user
+        # And initializing the corresponding metrics array
+        results["months"] = list(
+            OrderedDict(((start + timedelta(_)).strftime('%Y-%m'), None) for _ in range((end - start).days)).keys())
+        results["downloads"] = [0] * len(results["months"])
+        results["views"] = [0] * len(results["months"])
+        results["citations"] = [0] * len(results["months"])
+
+        # Gathering Citations
+        resultDetails = {}
+        resultDetails["citations"] = []
+        citationDict = {}
+        totalCitations, resultDetails["citations"] = self.gatherCitations(citation_pids)
+
+        for citationObject in resultDetails["citations"]:
+            if (citationObject["link_publication_date"][:7] in citationDict):
+                citationDict[citationObject["link_publication_date"][:7]] = citationDict[
+                                                                                citationObject["link_publication_date"][
+                                                                                :7]] + 1
+            else:
+                citationDict[citationObject["link_publication_date"][:7]] = 1
+
+        # Formatting the response from ES
+        for i in data["aggregations"]["pid_list"]["buckets"]:
+            months = datetime.utcfromtimestamp((i["key"]["month"] // 1000)).strftime(('%Y-%m'))
+            month_index = results["months"].index(months)
+            if i["key"]["format"] == "DATA":
+                results["downloads"][month_index] += i["doc_count"]
+            elif i["key"]["format"] == "METADATA":
+                results["views"][month_index] += i["doc_count"]
+            else:
+                pass
+
+        for months in citationDict:
+            if months in results["months"]:
+                month_index = results["months"].index(months)
+                results["citations"][month_index] = citationDict[months]
+            else:
+                results["months"].append(months)
+                results["views"].append(0)
+                results["downloads"].append(0)
+                results["citations"][month_index] = citationDict[months]
+
+        return results, resultDetails
+
+
 
 if __name__ == "__main__":
     mr = MetricsReader()
     mr.resolvePIDs(["doi:10.5065/D6BG2KW9"])
+    mr.getDatasetIdentifierFamily("user", "http://orcid.org/0000-0002-0381-3766")
