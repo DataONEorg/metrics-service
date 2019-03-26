@@ -1,0 +1,35 @@
+"^ruby$": machineUA
+"AddThis": machineUA
+"aria2\\/\\d": machineUA
+"CakePHP": machineUA
+"ColdFusion": machineUA
+"curl\\/": machineUA
+"^\\%?default\\%?$": machineUA
+"Dispatch\\/\\d": machineUA
+"EBSCO\\sEJS\\sContent\\sServer": machineUA
+"Fetch(\\s|\\+)API(\\s|\\+)Request": machineUA
+"geturl": machineUA
+"gvfs\\/": machineUA
+"HttpComponents\\/1.1": machineUA
+"http.?client": machineUA
+"Indy Library": machineUA
+"^java\\/\\d{1,2}.\\d": machineUA
+"libcurl": machineUA
+"libhttp": machineUA
+"libwww": machineUA
+"lwp": machineUA
+"Microsoft(\\s|\\+)URL(\\s|\\+)Control": machineUA
+"Microsoft Office Existence Discovery|ng\\/2\\.": machineUA
+"no_user_agent": machineUA
+"pear.php.net": machineUA
+"PHP\\/": machineUA
+"PycURL": machineUA
+"python": machineUA
+"rss": machineUA
+"^undefined$": machineUA
+"^unknown$": machineUA
+"URL2File": machineUA
+"urllib": machineUA
+"Wget": machineUA
+"wordpress": machineUA
+
