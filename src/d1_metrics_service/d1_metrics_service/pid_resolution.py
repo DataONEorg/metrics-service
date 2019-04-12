@@ -109,6 +109,13 @@ def _getIdsFromSolrResponse(response_text, pids=[]):
           pids.append(pid)
     except KeyError as e:
       pass
+    # Added parsing for series identifiers
+    try:
+      pid = doc['seriesId']
+      if not pid in pids:
+        pids.append(pid)
+    except KeyError as e:
+      pass
   return pids
 
 
@@ -323,6 +330,10 @@ def getResolvePIDs(PIDs, solr_url=None, use_mm_params=True):
     result = []
     #always return at least this identifier
     result.append(an_id)
+
+    # including the very first pid in resourceMap
+    resMap.append(an_id)
+
     params = {'wt':(None,'json'),
               'fl':(None,'documents,resourceMap'),
               'rows':(None,1000)
@@ -348,7 +359,10 @@ def getResolvePIDs(PIDs, solr_url=None, use_mm_params=True):
         else:
           more_resMap_work = False
 
-      params['fl'] = (None,'id,documents,obsoletes')
+      # Adding the resMap identifiers to the datasetIdentifierFamily
+      result.extend(resMap)
+
+      params['fl'] = (None,'id,,seriesId,documents,obsoletes')
       query = ") OR (".join(map(quoteTerm, resMap))
       params['fq'] = (None,"resourceMap:((" + query + "))")
       response = _doPost(session, url, params, use_mm=use_mm_params)
