@@ -338,7 +338,7 @@ def getResolvePIDs(PIDs, solr_url=None):
       # Adding the resMap identifiers to the datasetIdentifierFamily
       result.extend(resMap)
 
-      params['fl'] = (None, 'id,,seriesId,documents,obsoletes')
+      params['fl'] = (None, 'id,seriesId,documents,obsoletes')
       query = ") OR (".join(map(quoteTerm, resMap))
       params['fq'] = (None,"resourceMap:((" + query + "))")
       response = session.post(url, files=params)
