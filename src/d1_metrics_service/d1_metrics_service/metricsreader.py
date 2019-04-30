@@ -127,6 +127,10 @@ class MetricsReader:
                     # Called when generating metrics for a specific user
                     results, resultDetails = self.getMetricsPerUser(filter_by[0]["values"])
 
+            if (filter_type == "group") and interpret_as == "list":
+                    # Called when generating metrics for a specific user
+                    results, resultDetails = self.getMetricsPerGroup(filter_by[0]["values"])
+
         self.response["results"] = results
         self.response["resultDetails"] = resultDetails
         self.logger.debug("exit process_request, duration=%fsec", time.time()-t_0)
@@ -1021,8 +1025,277 @@ class MetricsReader:
         return results, resultDetails
 
 
+    def getMetricsPerGroup(self, groupPIDArray):
+        """
+            Retrieves the metrics stats per user
+            Uses set of dataset identifiers as userID for now
+            :param: requestPIDArray - set of dataset identifiers that belongs to the user
+            :return:
+                Formatted Metrics Resonse object in JSON format
+        """
+
+        # Basic init for required objects
+        t_start = time.time()
+        metrics_elastic_search = MetricsElasticSearch()
+        metrics_elastic_search.connect()
+
+        t_delta = time.time() - t_start
+        self.logger.debug('getMetricsPerGroup:t1=%.4f', t_delta)
+
+        grouPID = groupPIDArray[0]
+        print(grouPID)
+
+        t_resolve_start = time.time() - t_start
+
+        combinedPIDs = []
+        combinedPIDs = self.getDatasetIdentifierFamily("group", grouPID)
+
+        t_resolve_end = time.time() - t_start
+
+
+
+        if (len(self.response["metricsRequest"]["filterBy"]) > 1):
+            if (self.response["metricsRequest"]["filterBy"][1]["filterType"] == "month" and
+                        self.response["metricsRequest"]["filterBy"][1]["interpretAs"] == "range"):
+                start_date = self.response["metricsRequest"]["filterBy"][1]["values"][0]
+            else:
+                start_date = "01/01/2012"
+        else:
+            start_date = "01/01/2012"
+        end_date = datetime.today().strftime('%m/%d/%Y')
+
+
+        # Setting the query for the user profile
+        metrics_elastic_search = MetricsElasticSearch()
+        metrics_elastic_search.connect()
+        search_body = [
+            {
+                "term": {"event.key": "read"}
+            },
+            {
+                "terms": {
+                    "pid.key": combinedPIDs
+                }
+
+            },
+            {
+                "exists": {
+                    "field": "sessionId"
+                }
+            },
+            {
+                "terms": {
+                    "formatType": [
+                        "DATA",
+                        "METADATA"
+                    ]
+                }
+            }
+        ]
+        aggregation_body = {
+            "pid_list": {
+                "composite": {
+                    "sources": [
+                        {
+                            "format": {
+                                "terms": {
+                                    "field": "formatType"
+                                }
+                            }
+                        },
+                        {
+                            "month": {
+                                "date_histogram": {
+                                    "field": "dateLogged",
+                                    "interval": "month"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+
+        t_delta = time.time() - t_start
+        self.logger.debug('getMetricsPerGroup:t2=%.4f', t_delta)
+        self.logger.debug('getMetricsPerGroup:t2=%.4f', t_delta)
+
+        t_es_start = time.time() - t_start
+
+        data = metrics_elastic_search.iterate_composite_aggregations(search_query=search_body,
+                                                                     aggregation_query=aggregation_body,
+                                                                     start_date=datetime.strptime(start_date,
+                                                                                                  '%m/%d/%Y'),
+                                                                     end_date=datetime.strptime(end_date, '%m/%d/%Y'))
+
+        t_es_end = time.time() - t_start
+
+        self.response["resolve_time"] = t_resolve_end - t_resolve_start
+        self.response["es_time"] = t_es_end - t_es_start
+        self.response["combined_pids_length"] = len(combinedPIDs)
+
+        return (self.formatDataPerGroup(data, combinedPIDs, start_date, end_date))
+
+
+    def formatDataPerGroup(self, data, citation_pids, start_date, end_date):
+        """
+        Formats the results retrieved from the Elastic Search and returns it as a HTTP response
+        :param data: the data retrieve from ES
+        :param citation_pids: PIDS to check the corresponding citations for
+        :param start_date: begin date range for the results
+        :param end_date: end date range for the results
+        :return:
+            A tuple of formatted JSON response objects containing the metrics corresponding metadata.
+        """
+        results = {
+            "months": [],
+            "downloads": [],
+            "views": [],
+            "citations": [],
+        }
+
+        # Getting the months between the two given dates:
+        start = datetime.strptime(start_date, "%m/%d/%Y")
+        end = datetime.strptime(end_date, "%m/%d/%Y")
+
+        # Getting a list of all the months possible for the user
+        # And initializing the corresponding metrics array
+        results["months"] = list(
+            OrderedDict(((start + timedelta(_)).strftime('%Y-%m'), None) for _ in range((end - start).days)).keys())
+        results["downloads"] = [0] * len(results["months"])
+        results["views"] = [0] * len(results["months"])
+        results["citations"] = [0] * len(results["months"])
+
+        # Gathering Citations
+        resultDetails = {}
+        resultDetails["citations"] = []
+        citationDict = {}
+        totalCitations, resultDetails["citations"] = self.gatherCitations(citation_pids)
+
+        for citationObject in resultDetails["citations"]:
+            if (citationObject["link_publication_date"][:7] in citationDict):
+                citationDict[citationObject["link_publication_date"][:7]] = citationDict[
+                                                                                citationObject["link_publication_date"][
+                                                                                :7]] + 1
+            else:
+                citationDict[citationObject["link_publication_date"][:7]] = 1
+
+        # Formatting the response from ES
+        for i in data["aggregations"]["pid_list"]["buckets"]:
+            months = datetime.utcfromtimestamp((i["key"]["month"] // 1000)).strftime(('%Y-%m'))
+            month_index = results["months"].index(months)
+            if i["key"]["format"] == "DATA":
+                results["downloads"][month_index] += i["doc_count"]
+            elif i["key"]["format"] == "METADATA":
+                results["views"][month_index] += i["doc_count"]
+            else:
+                pass
+
+        for months in citationDict:
+            if months in results["months"]:
+                month_index = results["months"].index(months)
+                results["citations"][month_index] = citationDict[months]
+            else:
+                results["months"].append(months)
+                results["views"].append(0)
+                results["downloads"].append(0)
+                results["citations"][month_index] = citationDict[months]
+
+        return results, resultDetails
+
+
+    def getDatasetIdentifierFamily(self, filter_type, filter_type_identifier):
+        """
+        A method to query the new ES `identifiers-*` index
+        :param filter_type:
+        :param filter_type_identifier:
+        :return:
+        """
+
+        # Basic init for required objects
+        t_start = time.time()
+        metrics_elastic_search = MetricsElasticSearch()
+        metrics_elastic_search.connect()
+
+        t_delta = time.time() - t_start
+        self.logger.debug('getMetricsPerUser:t1=%.4f', t_delta)
+
+        if (filter_type == "dataset"):
+            term_attribute = "_id"
+
+            search_query = {
+                "bool": {
+                    "must": [
+                        {
+                            "term": {
+                                term_attribute: filter_type_identifier
+                            }
+                        }
+                    ]
+                }
+            }
+
+            # Try searching the identifiers index for the datasetIdentifierFamily
+            results = metrics_elastic_search.getDatasetIdentifierFamily(search_query)
+
+            if len(results) > 0:
+                for i in results[0]:
+                    return (i["datasetIdentifierFamily"])
+
+            else:
+
+                print("No entry fround in identifier's index, so querying solr to resolve the corresponding pids")
+                temp_array = []
+                temp_array.append(filter_type_identifier)
+
+                return (pid_resolution.getResolvePIDs(temp_array))
+
+        elif (filter_type == "user" or filter_type == "group"):
+            term_attribute = "userID.keyword"
+
+            search_query = {
+                "bool": {
+                    "must": [
+                        {
+                            "term": {
+                                term_attribute: filter_type_identifier
+                            }
+                        },
+                        {
+                            "term": {
+                                "isPublic": "true"
+                            }
+                        }
+                    ]
+                }
+            }
+
+            # Try searching the identifiers index for the datasetIdentifierFamily
+            results = metrics_elastic_search.getDatasetIdentifierFamily(search_query)
+
+            self.response["hits"] = len(results[0])
+
+            if len(results) > 0:
+                combinedPIDs = []
+                for i in results[0]:
+                    combinedPIDs.extend(i["datasetIdentifierFamily"])
+                return combinedPIDs
+
+
+            else:
+
+                print("No entry fround in identifier's index, so querying solr to resolve the corresponding pids")
+                temp_array = []
+                temp_array.append(filter_type_identifier)
+
+                return (pid_resolution.getResolvePIDs(temp_array))
+
+
+
+
+
 
 if __name__ == "__main__":
     mr = MetricsReader()
-    mr.resolvePIDs(["doi:10.5065/D6BG2KW9"])
+    # mr.resolvePIDs(["doi:10.5065/D6BG2KW9"])
     mr.getDatasetIdentifierFamily("user", "http://orcid.org/0000-0002-0381-3766")
