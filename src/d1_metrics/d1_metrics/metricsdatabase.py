@@ -141,13 +141,6 @@ class MetricsDatabase(object):
         operations = {
             "version": "SELECT version FROM db_version;",
             "rows": "SELECT count(*) FROM metrics;",
-            "landingpages": "SELECT count(*) FROM landingpage;",
-            "userprofilemetrics": "SELECT count(*) FROM userprofilemetrics;",
-            "userprofilecharts": "SELECT count(*) FROM userprofilecharts;",
-            "repometrics": "SELECT count(*) FROM repometrics;",
-            "repocharts": "SELECT count(*) FROM repocharts;",
-            "awardmetrics": "SELECT count(*) FROM awardmetrics;",
-            "awardcharts": "SELECT count(*) FROM awardcharts;",
         }
         with self.getCursor() as csr:
             for key, value in iter(operations.items()):
@@ -229,39 +222,6 @@ class MetricsDatabase(object):
             res[k] = v
         return res
 
-    def getSummaryMetricsPerDataset(self):
-        '''
-        Method that queries the DB materialized views
-        for the dataset landing page.
-        :return: Dictionary object containing all the results
-        '''
-        res = dict()
-        csr = self.getCursor()
-        sql = "select * from landingpage3 where dataset_id in (\'" \
-              + "\',\'".join(request) + "\') " \
-              + "group by month, year, metrics_name, sum, dataset_id order by month, year;"
-        csr.execute(sql)
-        # retrieving the results
-        rows = csr.fetchall()
-        # appending the results to a list and
-        # returning it to the MetricsHandler class
-        for items in res:
-            if items[1] in res:
-                res[items[1]].append(str(items[4]))
-            else:
-                res[items[1]] = []
-                res[items[1]].append(str(items[4]))
-
-            if 'Months' in res:
-                if str(items[2]) + "-" + str(items[3]) in res['Months']:
-                    pass
-                else:
-                    res['Months'].append(str(items[2]) + "-" + str(items[3]))
-            else:
-                res['Months'] = []
-                res['Months'].append(str(items[2]) + "-" + str(items[3]))
-        return res
-
     def getCitations(self):
         '''
         Gets citations from the crossref end point
@@ -270,7 +230,7 @@ class MetricsDatabase(object):
 
         dois, pref = self.getDOIs()
         csr = self.getCursor()
-        sql = "INSERT INTO CITATIONS(id, report, metadata, target_id, source_id, source_url, link_publication_date, origin, title, " + \
+        sql = "INSERT INTO CITATIONS_TEST(id, report, metadata, target_id, source_id, source_url, link_publication_date, origin, title, " + \
               "publisher, journal, volume, page, year_of_publishing) values ( DEFAULT,'"
 
         count = 0
@@ -282,15 +242,14 @@ class MetricsDatabase(object):
             res = requests.get(
                 "https://api.eventdata.crossref.org/v1/events/scholix?source=crossref&obj-id.prefix=" + i)
             results = res.json()
+            citCount = 0
             for val in results["message"]["link-packages"]:
                 for doi in dois:
                     if (val["Target"]["Identifier"]["ID"]).lower() in doi.lower():
                         target_pid = val["Target"]["Identifier"]["ID"]
                         source_pid = val["Source"]["Identifier"]["ID"]
                         count = count + 1
-                        # print()
-                        # print("Target {0:0=3d}".format(count), " - ", target_pid)
-                        # print("Source {0:0=3d}".format(count), " - ", source_pid)
+
                         try:
                             url = val["Source"]["Identifier"]["IDUrl"]
                             headers = {'Accept': 'application/json'}
@@ -327,45 +286,46 @@ class MetricsDatabase(object):
                                     values.append((metadata["message"]["publisher"]).replace("'", r"''"))
                                     values.append(str(metadata["message"]["created"]["date-parts"][0][0]))
                             else:
-                                # Format the response retrieved from the doi resolving endpoint and save it to a dictionary
-                                # mdata_resp = mdata.text[6:-1]
-                                # mdata_list = mdata_resp.split("\n")
-                                # metadata = {}
-                                # for i in mdata_list:
-                                #   key = i.split("=")
-                                #   if len(key) > 1:
-                                #     key[0] = key[0].strip()
-                                #     metadata[key[0]] = key[1][key[1].find("{")+1:key[1].rfind("}")]
-                                metadata = mdata.json()
-                                # print(metadata)
-                                author = []
-                                for i in metadata["author"]:
-                                    if "given" in i:
-                                        author.append((i["given"] + " " + i["family"]))
-                                    elif "name" in i:
-                                        author.append(i["name"])
+
+                                try:
+                                    metadata = mdata.json()
+                                except:
+                                    print(doi)
+                                    continue
+
+                                try:
+                                    author = []
+                                    for i in metadata["author"]:
+                                        if "given" in i:
+                                            author.append((i["given"] + " " + i["family"]))
+                                        elif "name" in i:
+                                            author.append(i["name"])
+                                        else:
+                                            author.append('')
+                                    values.append(", ".join(author).replace("'", r"''"))
+                                    values.append(metadata["title"].replace("'", r"''"))
+                                    values.append(metadata["publisher"].replace("'", r"''"))
+                                    if "container-title" in metadata:
+                                        values.append(metadata["container-title"].replace("'", r"''"))
                                     else:
-                                        author.append('')
-                                values.append(", ".join(author).replace("'", r"''"))
-                                values.append(metadata["title"].replace("'", r"''"))
-                                values.append(metadata["publisher"].replace("'", r"''"))
-                                if "container-title" in metadata:
-                                    values.append(metadata["container-title"].replace("'", r"''"))
-                                else:
-                                    values.append('NULL')
-                                if "volume" in metadata:
-                                    values.append(metadata["volume"].replace("'", r"''"))
-                                else:
-                                    values.append('NULL')
-                                if "page" in metadata:
-                                    values.append(metadata["page"].replace("'", r"''"))
-                                else:
-                                    values.append('NULL')
-                                values.append(str(metadata["created"]["date-parts"][0][0]))
-                            csr.execute(sql + (json.dumps(results)).replace("'", r"''") + "','" + (
-                            json.dumps(metadata)).replace("'", r"''") + "','" + "','".join(values) + "');")
-                            print("A new citation record inserted!")
-                            pass
+                                        values.append('NULL')
+                                    if "volume" in metadata:
+                                        values.append(metadata["volume"].replace("'", r"''"))
+                                    else:
+                                        values.append('NULL')
+                                    if "page" in metadata:
+                                        values.append(metadata["page"].replace("'", r"''"))
+                                    else:
+                                        values.append('NULL')
+                                    values.append(str(metadata["created"]["date-parts"][0][0]))
+                                    csr.execute(sql + (json.dumps(results)).replace("'", r"''") + "','" + (
+                                    json.dumps(metadata)).replace("'", r"''") + "','" + "','".join(values) + "');")
+                                    if count%5 == 0:
+                                        print("Citation Insertion Count ", str(count))
+                                except:
+                                    print("Exception occured")
+                                    print("DOI Error: {0:0=3d}".format(count), " - ", doi)
+
                         except psycopg2.DatabaseError as e:
                             print('Database error!\n{0}', e)
                             print()
@@ -473,11 +433,37 @@ class MetricsDatabase(object):
         :return: Set objects containing dois and their prefixes
         """
         cd = solrclient.SolrClient('https://cn.dataone.org/cn/v2/query', 'solr')
-        data = cd.getFieldValues('id', q='id:*doi*')
+        data = cd.getFieldValues('id', q='id:/.*doi.*{1,5}10\.[0-9]{4,6}.*/')
+        seriesIdData = cd.getFieldValues('seriesId', q='seriesId:/.*doi.*{1,5}10\.[0-9]{4,6}.*/')
         prefixes = []
         doi = []
+        count = 0
+
+        # Performing parsing of the identifiers that have DOI
         for hit in data['id'][::2]:
-            start_doi = hit.index("10.")
+            count += 1
+
+            try:
+                start_doi = hit.index("10.")
+            except:
+                print(hit)
+                continue
+
+            doi.append(hit)
+            prefixes.append(hit[start_doi:start_doi + 7])
+
+        count = 0
+
+        # Performing parsing of the series identifiers that have DOI
+        for hit in seriesIdData['seriesId'][::2]:
+            count += 1
+
+            try:
+                start_doi = hit.index("10.")
+            except:
+                print(hit)
+                continue
+
             doi.append(hit)
             prefixes.append(hit[start_doi:start_doi + 7])
         dois = set(doi)
@@ -512,7 +498,7 @@ class MetricsDatabase(object):
             unique_pids = set(target_pids)
 
             for i in unique_pids:
-                response = self.query_solr(q=i)
+                response = self.query_solr(q="*" + i + "*")
                 results = response["response"]
                 if results["numFound"] > 0:
                     for j in results["docs"]:
@@ -544,7 +530,7 @@ class MetricsDatabase(object):
         :return: JSON Object containing the metadata fields queried from Solr
         """
 
-        queryString = 'q=id:*' + q + '*&fl=origin,authoritativeMN&wt=json'
+        queryString = 'q=id:"' + q + '" OR seriesId:"' + q + '"&fl=origin,authoritativeMN,title,pubDate,datePublished,dateUploaded,topic,author&wt=json'
 
         response = requests.get(url=self.solr_query_url, params=queryString)
 
@@ -554,3 +540,4 @@ class MetricsDatabase(object):
 if __name__ == "__main__":
     md = MetricsDatabase()
     md.getTargetCitationMetadata()
+    # md.getDOIs()
