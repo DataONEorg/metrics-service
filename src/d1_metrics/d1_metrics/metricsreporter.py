@@ -18,6 +18,7 @@ from d1_metrics.metricselasticsearch import MetricsElasticSearch
 from collections import Counter
 from dateutil.relativedelta import relativedelta
 import logging
+import asyncio
 
 DEFAULT_REPORT_CONFIGURATION={
     "report_url" : "https://api.datacite.org/reports",
@@ -148,7 +149,6 @@ class MetricsReporter(object):
                 unique_pids.append(i)
 
         return (unique_pids)
-
 
 
     def generate_instances(self, start_date, end_date, pid_list):
@@ -318,7 +318,6 @@ class MetricsReporter(object):
                         }
                     }
         return report_instances
-
 
 
     def get_report_datasets(self, start_date, end_date, unique_pids, node ):
@@ -567,9 +566,6 @@ class MetricsReporter(object):
                 start_date, end_date = prevDate.strftime('%m/%d/%Y'),\
                              date.strftime('%m/%d/%Y')
 
-
-
-
                 unique_pids = self.get_unique_pids(start_date, end_date, node, doi=True)
 
                 if (len(unique_pids) > 0):
@@ -601,7 +597,6 @@ class MetricsReporter(object):
         if date.month == 12:
             return date.replace(day=31)
         return date.replace(month=date.month + 1, day=1) - timedelta(days=1)
-
 
 
     def get_MN_List(self):
@@ -713,13 +708,101 @@ class MetricsReporter(object):
                 doi_dict[result["pid"]] = []
                 doi_dict[result["pid"]].append(result["pid"])
 
-        return doi_dict
+        return self.get_dataset_identifier_family(doi_dict)
 
 
+    def get_doi_dict_dataset_identifier_family(self, doi_dict):
+        """
+        Gets the dataset_identifier_family from the identifiers index for every key in the doi_dict
+
+        :param: doi_dict
+            A dictionary of the DOIs with the doi as the key and the resolved_pids a.k.a
+            the dataset_identifier_family as the value
+
+        :return: dictionary object
+        """
+
+        metrics_elastic_search = MetricsElasticSearch()
+        metrics_elastic_search.connect()
 
 
+        def _get_dataset_identifier_family(pid):
+            """
+
+            Retrieves the dataset_identifier_family
+
+            :param pid: The PID of interest
+
+            :return: a dictionary object
+
+            """
+
+            result = {}
+            result[pid] = []
+            result[pid].append(pid)
+
+            query_body = {
+                "bool": {
+                    "should": [
+                        {
+                            "term": {
+                                "PID.keyword": pid
+                            }
+                        }
+                    ]
+                }
+            }
+
+            data = metrics_elastic_search.getDatasetIdentifierFamily(search_query=query_body, max_limit=1)
+
+            result[pid].extend(data[0]["datasetIdentifierFamily"])
+
+            return result
 
 
+        async def work_get_identifier_family(doi_dict):
+            """
+
+            Creates async task to query ES, executes those tasks and returns results to
+            the parent function
+
+            :param doi_dict:
+
+            :return:
+
+            """
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as executor:
+                loop = asyncio.get_event_loop()
+                tasks = []
+
+                # for every pid in the dict
+                # cerate a new task and add it to the task list
+                for an_id, val in doi_dict:
+                    tasks.append(loop.run_in_executor(executor, _get_dataset_identifier_family, an_id))
+
+                # wait for the response to complete the tasks
+                for response in await asyncio.gather(*tasks):
+                    results[response[0]] = response
+
+        results = {}
+
+        # In a multithreading environment such as under gunicorn, the new thread created by
+        # gevent may not provide an event loop. Create a new one if necessary.
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError as e:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        future = asyncio.ensure_future(work_get_identifier_family(doi_dict))
+
+        # wait for the work to complete
+        loop.run_until_complete(future)
+
+        print(results)
+
+        return results
 
 
 if __name__ == "__main__":
