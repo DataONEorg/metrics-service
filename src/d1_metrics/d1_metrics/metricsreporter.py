@@ -596,6 +596,7 @@ class MetricsReporter(object):
                         "Skipping job for " + node + " " + start_date + " to " + end_date + " - length of PIDS : " + str(
                             len(unique_pids)))
 
+
     def last_day_of_month(self, date):
         if date.month == 12:
             return date.replace(day=31)
@@ -619,6 +620,103 @@ class MetricsReporter(object):
             if (node_type == "mn"):
                 mn_list.add(identifier.text)
         return(mn_list)
+
+
+    def get_es_unique_dois(self, start_date, end_date, nodeId = None):
+        """
+
+        Finds the dois from the eventlog and
+        returns a dictionary with the doi as the key and it's corresponding PID as a value
+
+        :param start_date: begin date for search
+        :param end_date: end date for search
+        :param nodeId: Node ID for the query term
+
+        :return: dictionary object
+
+        """
+
+        metrics_elastic_search = MetricsElasticSearch()
+        metrics_elastic_search.connect()
+
+
+
+        seriesIdWildCard = {
+            "seriesId": {
+                "value": "*doi*"
+            }
+        }
+
+        PIDWildCard = {
+            "pid.key": {
+                "value": "*doi*"
+            }
+        }
+
+        doi_dict = {}
+
+        query = {
+            "bool": {
+                "must": [
+                    {
+                        "term": {"event.key": "read"}
+                    },
+                    {
+                        "exists": {
+                            "field": "sessionId"
+                        }
+                    },
+                    {
+                        "terms": {
+                            "formatType": [
+                                "DATA",
+                                "METADATA"
+                            ]
+                        } 
+                    },
+                    {
+                        "wildcard": seriesIdWildCard
+                    }
+                ]
+            }
+        }
+
+        if not nodeId:
+            nodeQuery = {
+                "term": {
+                    "nodeId" : nodeId
+                }
+            }
+            query["bool"]["must"].append(nodeQuery)
+
+        fields = ["pid", "seriesId"]
+
+        results, total1 = metrics_elastic_search.getSearches(limit=1000000, q=query, fields=fields, date_start=datetime.strptime(start_date,'%m/%d/%Y')
+                                                     , date_end=datetime.strptime(end_date,'%m/%d/%Y'))
+
+        print(total1 , " == ", len(results))
+
+        for result in results:
+            if result["seriesId"] not in doi_dict:
+                doi_dict[result["seriesId"]] = []
+                doi_dict[result["seriesId"]].append(result["pid"])
+
+        query["bool"]["must"][3]["wildcard"] = PIDWildCard
+
+        results, total2 = metrics_elastic_search.getSearches(limit=1000000, q=query, fields=fields, date_start=datetime.strptime(start_date,'%m/%d/%Y')
+                                                     , date_end=datetime.strptime(end_date,'%m/%d/%Y'))
+
+        print(total2, " == ", len(results))
+
+        for result in results:
+            if result["pid"] not in doi_dict:
+                doi_dict[result["pid"]] = []
+                doi_dict[result["pid"]].append(result["pid"])
+
+        return doi_dict
+
+
+
 
 
 
