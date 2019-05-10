@@ -19,6 +19,8 @@ from collections import Counter
 from dateutil.relativedelta import relativedelta
 import logging
 import asyncio
+from aiohttp import ClientSession
+import concurrent.futures
 
 DEFAULT_REPORT_CONFIGURATION={
     "report_url" : "https://api.datacite.org/reports",
@@ -29,6 +31,7 @@ DEFAULT_REPORT_CONFIGURATION={
     "solr_query_url": "https://cn.dataone.org/cn/v2/query/solr/"
 }
 
+CONCURRENT_REQUESTS = 10  #max number of concurrent requests to run
 
 class MetricsReporter(object):
 
@@ -676,7 +679,7 @@ class MetricsReporter(object):
             }
         }
 
-        if not nodeId:
+        if nodeId:
             nodeQuery = {
                 "term": {
                     "nodeId" : nodeId
@@ -708,7 +711,11 @@ class MetricsReporter(object):
                 doi_dict[result["pid"]] = []
                 doi_dict[result["pid"]].append(result["pid"])
 
-        return self.get_dataset_identifier_family(doi_dict)
+        # query identifiers index only if there is anything to query!
+        if len(doi_dict) > 0:
+            return self.get_doi_dict_dataset_identifier_family(doi_dict)
+
+        return {}
 
 
     def get_doi_dict_dataset_identifier_family(self, doi_dict):
@@ -755,7 +762,12 @@ class MetricsReporter(object):
 
             data = metrics_elastic_search.getDatasetIdentifierFamily(search_query=query_body, max_limit=1)
 
-            result[pid].extend(data[0]["datasetIdentifierFamily"])
+            # Parse only if there are existing records found in the `identifiers index`
+            try:
+                if data[1] > 0:
+                    result[pid].extend(data[0][0]["datasetIdentifierFamily"])
+            except:
+                pass
 
             return result
 
@@ -778,12 +790,15 @@ class MetricsReporter(object):
 
                 # for every pid in the dict
                 # cerate a new task and add it to the task list
-                for an_id, val in doi_dict:
+                for an_id in doi_dict:
                     tasks.append(loop.run_in_executor(executor, _get_dataset_identifier_family, an_id))
 
                 # wait for the response to complete the tasks
                 for response in await asyncio.gather(*tasks):
-                    results[response[0]] = response
+                    for response_key,response_val in response.items():
+                        results[response_key] = response_val
+
+            return
 
         results = {}
 
@@ -799,8 +814,6 @@ class MetricsReporter(object):
 
         # wait for the work to complete
         loop.run_until_complete(future)
-
-        print(results)
 
         return results
 
