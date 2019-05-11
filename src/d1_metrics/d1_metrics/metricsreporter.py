@@ -7,6 +7,7 @@ from elasticsearch import helpers
 
 import argparse
 import sys
+import time
 import requests
 import json
 import urllib.request
@@ -21,6 +22,8 @@ import logging
 import asyncio
 from aiohttp import ClientSession
 import concurrent.futures
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 
 DEFAULT_REPORT_CONFIGURATION={
     "report_url" : "https://api.datacite.org/reports",
@@ -456,8 +459,13 @@ class MetricsReporter(object):
         :param authoritativeMN:
         :return: String value of the name of the authoritativeMN
         """
+        session = requests.Session()
+        retry = Retry(connect=3, backoff_factor=0.5)
+        adapter = HTTPAdapter(max_retries=retry)
+        session.mount('https://', adapter)
+
         node_url = "https://cn.dataone.org/cn/v2/node/" + authoritativeMN
-        resp = requests.get(node_url, stream=True)
+        resp = session.get(node_url, stream=True)
         root = ElementTree.fromstring(resp.content)
         name = root.find('name').text
         return name
@@ -540,8 +548,14 @@ class MetricsReporter(object):
         :return: JSON Object containing the metadata fields queried from Solr
         """
 
+        session = requests.Session()
+        retry = Retry(connect=3, backoff_factor=0.5)
+        adapter = HTTPAdapter(max_retries=retry)
+        session.mount('http://', adapter)
+        session.mount('https://', adapter)
+
         queryString = 'q=id:"' + PID + '"&fl=origin,title,datePublished,dateUploaded,authoritativeMN,dataUrl&wt=json'
-        response = requests.get(url = self._config["solr_query_url"], params = queryString)
+        response = session.get(url = self._config["solr_query_url"], params = queryString)
 
         return response.json()
 
@@ -552,48 +566,59 @@ class MetricsReporter(object):
         Probably would be called only once in its lifetime
         :return: None
         """
-        mn_list = self.get_MN_List()
+        mn_list = self.get_MN_Dict()
         for node in mn_list:
             date = datetime(2013, 1, 1)
             stopDate = datetime(2013, 12, 31)
 
             count = 0
+            # while (date.strftime('%Y-%m-%d') != stopDate.strftime('%Y-%m-%d')):
+            #     self.logger.debug("Running job for Node: " + node)
+            #
+            #     count = count + 1
+            #
+            #     prevDate = date + timedelta(days=1)
+            #     date = self.last_day_of_month(prevDate)
+            #
+            #     start_date, end_date = prevDate.strftime('%m/%d/%Y'),\
+            #                  date.strftime('%m/%d/%Y')
+            #
+            #     unique_pids = self.get_unique_pids(start_date, end_date, node, doi=True)
+            #
+            #     if (len(unique_pids) > 0):
+            #         self.logger.debug("Job " + " : " + start_date + " to " + end_date)
+            #
+            #         # Uncomment me to send reports to the HUB!
+            #         response = self.report_handler(start_date, end_date, node, unique_pids)
+            #
+            #
+            #         logentry = "Node " + node + " : " + start_date + " to " + end_date + " === " + str(response.status_code)
+            #
+            #         self.logger.debug(logentry)
+            #
+            #         if response.status_code != 201:
+            #
+            #             logentry = "Node " + node + " : " + start_date + " to " + end_date + " === " \
+            #                        + str(response.status_code)
+            #             self.logger.error(logentry)
+            #             self.logger.error(str(response.status_code) + " " + response.reason)
+            #             self.logger.error("Headers: " + str(response.headers))
+            #             self.logger.error("Content: " + str((response.content).decode("utf-8")))
+            #     else:
+            #         self.logger.debug(
+            #             "Skipping job for " + node + " " + start_date + " to " + end_date + " - length of PIDS : " + str(
+            #                 len(unique_pids)))
+
+
             while (date.strftime('%Y-%m-%d') != stopDate.strftime('%Y-%m-%d')):
-                self.logger.debug("Running job for Node: " + node)
-
-                count = count + 1
-
                 prevDate = date + timedelta(days=1)
                 date = self.last_day_of_month(prevDate)
 
-                start_date, end_date = prevDate.strftime('%m/%d/%Y'),\
-                             date.strftime('%m/%d/%Y')
+                start_date, end_date = prevDate.strftime('%m/%d/%Y'), \
+                                       date.strftime('%m/%d/%Y')
 
-                unique_pids = self.get_unique_pids(start_date, end_date, node, doi=True)
-
-                if (len(unique_pids) > 0):
-                    self.logger.debug("Job " + " : " + start_date + " to " + end_date)
-
-                    # Uncomment me to send reports to the HUB!
-                    response = self.report_handler(start_date, end_date, node, unique_pids)
-
-
-                    logentry = "Node " + node + " : " + start_date + " to " + end_date + " === " + str(response.status_code)
-
-                    self.logger.debug(logentry)
-
-                    if response.status_code != 201:
-
-                        logentry = "Node " + node + " : " + start_date + " to " + end_date + " === " \
-                                   + str(response.status_code)
-                        self.logger.error(logentry)
-                        self.logger.error(str(response.status_code) + " " + response.reason)
-                        self.logger.error("Headers: " + str(response.headers))
-                        self.logger.error("Content: " + str((response.content).decode("utf-8")))
-                else:
-                    self.logger.debug(
-                        "Skipping job for " + node + " " + start_date + " to " + end_date + " - length of PIDS : " + str(
-                            len(unique_pids)))
+                print("Running for ", start_date, end_date, node)
+                self.get_es_unique_dois(start_date, end_date, nodeId = node)
 
 
     def last_day_of_month(self, date):
@@ -602,7 +627,7 @@ class MetricsReporter(object):
         return date.replace(month=date.month + 1, day=1) - timedelta(days=1)
 
 
-    def get_MN_List(self):
+    def get_MN_Dict(self):
         """
         Retreives a MN idenifier from the https://cn.dataone.org/cn/v2/node/ endpoint
         Used to send the reports for different MNs
@@ -611,13 +636,14 @@ class MetricsReporter(object):
         node_url = "https://cn.dataone.org/cn/v2/node/"
         resp = requests.get(node_url, stream=True)
         root = ElementTree.fromstring(resp.content)
-        mn_list = set()
+        mn_dict = dict()
+
         for child in root:
-            node_type = child.attrib['type']
-            identifier = child.find('identifier')
-            if (node_type == "mn"):
-                mn_list.add(identifier.text)
-        return(mn_list)
+            identifier = child.find('identifier').text
+            name = child.find('name').text
+            mn_dict[identifier] = name
+
+        return(mn_dict)
 
 
     def get_es_unique_dois(self, start_date, end_date, nodeId = None):
