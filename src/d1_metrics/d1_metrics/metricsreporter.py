@@ -572,53 +572,42 @@ class MetricsReporter(object):
             stopDate = datetime(2013, 12, 31)
 
             count = 0
-            # while (date.strftime('%Y-%m-%d') != stopDate.strftime('%Y-%m-%d')):
-            #     self.logger.debug("Running job for Node: " + node)
-            #
-            #     count = count + 1
-            #
-            #     prevDate = date + timedelta(days=1)
-            #     date = self.last_day_of_month(prevDate)
-            #
-            #     start_date, end_date = prevDate.strftime('%m/%d/%Y'),\
-            #                  date.strftime('%m/%d/%Y')
-            #
-            #     unique_pids = self.get_unique_pids(start_date, end_date, node, doi=True)
-            #
-            #     if (len(unique_pids) > 0):
-            #         self.logger.debug("Job " + " : " + start_date + " to " + end_date)
-            #
-            #         # Uncomment me to send reports to the HUB!
-            #         response = self.report_handler(start_date, end_date, node, unique_pids)
-            #
-            #
-            #         logentry = "Node " + node + " : " + start_date + " to " + end_date + " === " + str(response.status_code)
-            #
-            #         self.logger.debug(logentry)
-            #
-            #         if response.status_code != 201:
-            #
-            #             logentry = "Node " + node + " : " + start_date + " to " + end_date + " === " \
-            #                        + str(response.status_code)
-            #             self.logger.error(logentry)
-            #             self.logger.error(str(response.status_code) + " " + response.reason)
-            #             self.logger.error("Headers: " + str(response.headers))
-            #             self.logger.error("Content: " + str((response.content).decode("utf-8")))
-            #     else:
-            #         self.logger.debug(
-            #             "Skipping job for " + node + " " + start_date + " to " + end_date + " - length of PIDS : " + str(
-            #                 len(unique_pids)))
-
-
             while (date.strftime('%Y-%m-%d') != stopDate.strftime('%Y-%m-%d')):
+                self.logger.debug("Running job for Node: " + node)
+
+                count = count + 1
+
                 prevDate = date + timedelta(days=1)
                 date = self.last_day_of_month(prevDate)
 
-                start_date, end_date = prevDate.strftime('%m/%d/%Y'), \
-                                       date.strftime('%m/%d/%Y')
+                start_date, end_date = prevDate.strftime('%m/%d/%Y'),\
+                             date.strftime('%m/%d/%Y')
 
-                print("Running for ", start_date, end_date, node)
-                self.get_es_unique_dois(start_date, end_date, nodeId = node)
+                unique_pids = self.get_unique_pids(start_date, end_date, node, doi=True)
+
+                if (len(unique_pids) > 0):
+                    self.logger.debug("Job " + " : " + start_date + " to " + end_date)
+
+                    # Uncomment me to send reports to the HUB!
+                    response = self.report_handler(start_date, end_date, node, unique_pids)
+
+
+                    logentry = "Node " + node + " : " + start_date + " to " + end_date + " === " + str(response.status_code)
+
+                    self.logger.debug(logentry)
+
+                    if response.status_code != 201:
+
+                        logentry = "Node " + node + " : " + start_date + " to " + end_date + " === " \
+                                   + str(response.status_code)
+                        self.logger.error(logentry)
+                        self.logger.error(str(response.status_code) + " " + response.reason)
+                        self.logger.error("Headers: " + str(response.headers))
+                        self.logger.error("Content: " + str((response.content).decode("utf-8")))
+                else:
+                    self.logger.debug(
+                        "Skipping job for " + node + " " + start_date + " to " + end_date + " - length of PIDS : " + str(
+                            len(unique_pids)))
 
 
     def last_day_of_month(self, date):
