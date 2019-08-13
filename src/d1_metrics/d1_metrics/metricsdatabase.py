@@ -230,7 +230,7 @@ class MetricsDatabase(object):
 
         dois, pref = self.getDOIs()
         csr = self.getCursor()
-        sql = "INSERT INTO CITATIONS_TEST(id, report, metadata, target_id, source_id, source_url, link_publication_date, origin, title, " + \
+        sql = "INSERT INTO CITATIONS(id, report, metadata, target_id, source_id, source_url, link_publication_date, origin, title, " + \
               "publisher, journal, volume, page, year_of_publishing) values ( DEFAULT,'"
 
         count = 0
@@ -530,7 +530,9 @@ class MetricsDatabase(object):
         :return: JSON Object containing the metadata fields queried from Solr
         """
 
-        queryString = 'q=id:"' + q + '" OR seriesId:"' + q + '"&fl=origin,authoritativeMN,title,pubDate,datePublished,dateUploaded,topic,author&wt=json'
+        queryString = 'q=id:*' + q + '* OR id:*' + q.lower() + '* OR id:*' + q.upper() + 
+                      '* OR seriesId:*' + q + '* OR seriesId:*' + q.lower() + 
+                      '* OR seriesId:*' + q.upper() + '*&fl=origin,authoritativeMN&wt=json'
 
         response = requests.get(url=self.solr_query_url, params=queryString)
 
