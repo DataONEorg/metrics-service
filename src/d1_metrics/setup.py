@@ -15,7 +15,7 @@ setup(
   # Versions should comply with PEP440.  For a discussion on single-sourcing
   # the version across setup.py and the project code, see
   # https://packaging.python.org/en/latest/single_source_version.html
-  version='0.0.2',
+  version='0.1.0',
 
   description='Metrics service',
   long_description=long_description,
@@ -95,6 +95,7 @@ setup(
   entry_points={
     'console_scripts': ['d1metricsdb = d1_metrics.manage_db:main',
                         'd1metricses = d1_metrics.manage_es:main',
+                        'd1sysmetaes = d1_metrics.es_sysmeta_sync:main',
                         ]
   },
 )

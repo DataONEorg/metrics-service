@@ -278,7 +278,7 @@ def getObsolescenceChain(IDs, solr_url=None, max_depth=20):
   return results
 
 
-def getResolvePIDs(PIDs, solr_url=None):
+def getResolvePIDs(PIDs, solr_url=None, use_mm_params=True):
   '''
   Implements same functionality as metricsreader.resolvePIDs, except works asynchronously for input pids
 
@@ -300,34 +300,58 @@ def getResolvePIDs(PIDs, solr_url=None):
   Returns:
   '''
 
+  def _doPost(session, url, params, use_mm=True):
+    """
+    Post a request, using mime-multipart or not. This is necessary because
+    calling solr on the local address on the CN bypasses the CN service interface which
+    uses mime-multipart requests.
+
+    Args:
+      session: Session instance
+      url: URL for request
+      params: params configure for mime-multipart request
+      use_mm: if not true, then a form request is made.
+
+    Returns: response object
+    """
+    if use_mm:
+      return session.post(url, files=params)
+    paramsd = {key:value[1] for (key,value) in params.items()}
+    # This is necessary because the default query is set by the DataONE SOLR connector
+    # which is used when accessing solr through the public interface.
+    if not 'q' in paramsd:
+      paramsd['q'] = "*:*"
+    return session.post(url, data=paramsd)
+
+
   def _fetch(url, an_id):
     session = requests.Session()
     resMap = []
     result = []
     #always return at least this identifier
     result.append(an_id)
-    
-    #including the very first pid in resourceMap
+
+    # including the very first pid in resourceMap
     resMap.append(an_id)
-    
+
     params = {'wt':(None,'json'),
               'fl':(None,'documents,resourceMap'),
               'rows':(None,1000)
               }
     params['fq'] = (None,"((id:" + quoteTerm(an_id) + ") OR (seriesId:" + quoteTerm(an_id) + "))")
-    response = session.post(url, files=params)
+    response = _doPost(session, url, params, use_mm=use_mm_params)
     if response.status_code == requests.codes.ok:
       #continue
+      logging.debug(response.text)
       resMap = _getIdsFromSolrResponse(response.text,resMap)
       more_resMap_work = True
-      params['fl'] = (None,'obsoletes')
+      params['fl'] = (None,'documents,obsoletes')
 
       while more_resMap_work:
         current_length = len(resMap)
         query = ") OR (".join(map(quoteTerm, resMap))
         params['fq'] = (None,"id:((" + query + "))")
-        response = session.post(url, files=params)
-
+        response = _doPost(session, url, params, use_mm=use_mm_params)
         if response.status_code == requests.codes.ok:
           resMap = _getIdsFromSolrResponse(response.text, resMap)
           if len(resMap) == current_length:
@@ -337,12 +361,11 @@ def getResolvePIDs(PIDs, solr_url=None):
 
       # Adding the resMap identifiers to the datasetIdentifierFamily
       result.extend(resMap)
-      
-      params['fl'] = (None,'id,seriesId,documents,obsoletes')
+
+      params['fl'] = (None, 'id,seriesId,documents,obsoletes')
       query = ") OR (".join(map(quoteTerm, resMap))
       params['fq'] = (None,"resourceMap:((" + query + "))")
-      response = session.post(url, files=params)
-
+      response = _doPost(session, url, params, use_mm=use_mm_params)
       if response.status_code == requests.codes.ok:
         result = _getIdsFromSolrResponse(response.text, result)
 
@@ -351,7 +374,7 @@ def getResolvePIDs(PIDs, solr_url=None):
         current_length = len(result)
         query = ") OR (".join( map(quoteTerm, result) )
         params['fq'] = (None,'id:((' + query + '))')
-        response = session.post(url, files=params)
+        response = _doPost(session, url, params, use_mm=use_mm_params)
         if response.status_code == requests.codes.ok:
           result = _getIdsFromSolrResponse(response.text, result)
           if len(result) == current_length:
@@ -421,7 +444,8 @@ if __name__ == "__main__":
 
   def eg_getResolvePids():
     pids = ["urn:uuid:f46dafac-91e4-4f5f-aaff-b53eab9fe863", ]
-    res = getResolvePIDs(pids)
+    res = getResolvePIDs(pids, "http://localhost:8983/solr/search_core/select", use_mm_params=False)
+    #res = getResolvePIDs(pids)
     pprint(res, indent=2)
 
 
@@ -430,4 +454,5 @@ if __name__ == "__main__":
   logging.basicConfig(level=logging.DEBUG, format='%(threadName)10s %(name)18s: %(message)s')
   eg_pidsAndSid()
   eg_getObsolescenceChain()
+  print("==eg: getResolvePids==")
   eg_getResolvePids()
