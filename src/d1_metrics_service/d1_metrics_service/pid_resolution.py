@@ -411,6 +411,40 @@ def getResolvePIDs(PIDs, solr_url=None, use_mm_params=True):
   return results
 
 
+def getPortalCollectionQuery(url, portalLabel = None, pid = None, seriesId = None):
+    """
+      Returns the collection query for the portal
+      :param: url
+      :param: portalLabel
+      :param: pid
+      :param: seriesId
+
+      :returns: 
+        JSON object of the collectionQuery response retrieved from SOLR for a given portal label
+    """
+    if url is None:
+      url = "https://cn.dataone.org/cn/v2/query/solr/?"
+    session = requests.Session()
+    params = {'wt':(None,'json'),
+              'fl':(None,'collectionQuery'),
+              'rows':(None,10)
+              }
+
+    # supports retrieval of collection query via portal label, seriesId and PID
+    if (portalLabel is not None) or (seriesId is not None): 
+      if portalLabel:
+        params['q'] = (None,"(-obsoletedBy:* AND (label:" + portalLabel + "))")
+      if seriesId:
+        params['q'] = (None,"(-obsoletedBy:* AND (seriesId:" + seriesId + "))")
+    if pid:
+      params['q'] = (None,"((id:" + pid + "))")
+    response = session.post(url, files=params)
+    
+    if response.status_code == requests.codes.ok:
+      resp_json = response.json()
+
+    return resp_json
+
 
 if __name__ == "__main__":
   from pprint import pprint
@@ -452,7 +486,8 @@ if __name__ == "__main__":
   #change verbosity of the urllib3.connectionpool logging
   #logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
   logging.basicConfig(level=logging.DEBUG, format='%(threadName)10s %(name)18s: %(message)s')
-  eg_pidsAndSid()
-  eg_getObsolescenceChain()
-  print("==eg: getResolvePids==")
-  eg_getResolvePids()
+  # eg_pidsAndSid()
+  # eg_getObsolescenceChain()
+  # print("==eg: getResolvePids==")
+  # eg_getResolvePids()
+  # getPortalCollectionQuery(url="https://dev.nceas.ucsb.edu/knb/d1/mn/v2/query/solr/?", portalLabel="portal-test")
