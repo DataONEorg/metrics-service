@@ -219,6 +219,23 @@ class MetricsCacheHandler:
         return portal_label_dict
 
 
+    def perform_cache_refresh(self):
+        """
+            Cache Refresh Job scheduler
+            Schedules a cache refresh job every day at 12:30 
+
+            :param: None
+            :returns: None
+        """
+        
+        schedule.every().day.at("00:30").do(self.cache_update_job())
+        
+        while True:
+            self.logger.info("Performing Cache Refresh")
+            schedule.run_pending()
+            time.sleep(60)
+
+
 
 if __name__ == "__main__":
     cache_handler = MetricsCacheHandler()
