@@ -1295,6 +1295,117 @@ class MetricsReader:
                 return (pid_resolution.getResolvePIDs(temp_array))
 
 
+    def getMetricsPerPortal(self, portalLabel):
+        """
+            Handles the Metrics generation for a given portal
+            :param: portal label
+            :returns:
+                Metrics Service response for the Metrics filter type 'portal'
+
+        """
+        # Setting the query for the user profile
+        metrics_elastic_search = MetricsElasticSearch()
+        metrics_elastic_search.connect()
+
+        if (len(self.response["metricsRequest"]["filterBy"]) > 1):
+            if (self.response["metricsRequest"]["filterBy"][1]["filterType"] == "month" and
+                        self.response["metricsRequest"]["filterBy"][1]["interpretAs"] == "range"):
+                start_date = self.response["metricsRequest"]["filterBy"][1]["values"][0]
+            else:
+                start_date = "01/01/2012"
+        else:
+            start_date = "01/01/2012"
+        end_date = datetime.today().strftime('%m/%d/%Y')
+
+        results, resultDetails = {}, {}
+        t_start = time.time()
+
+        # Retrieving collection Query
+        portalCollectionQueryResponse = pid_resolution.getPortalCollectionQuery(url = "https://dev.nceas.ucsb.edu/knb/d1/mn/v2/query/solr/?", portalLabel = portalLabel)
+        collectionQuery = portalCollectionQueryResponse["response"]["docs"][0]["collectionQuery"]
+        collectionQuery = collectionQuery.replace('-obsoletedBy:* AND ', '')
+
+        resultDetails["collection_query"] = collectionQuery
+        resultDetails["collection_query_time"] = time.time() - t_start
+
+        t_portal_pids = time.time()
+
+        # Getting portal PIDs from Collection Query
+        status_code, portal_pids = pid_resolution.resolveCollectionQuery(url = None, collectionQuery = collectionQuery)
+        
+        if status_code != 200:
+            resultDetails["Error"] = "Can not resolve the collection query"
+            resultDetails["Status Code"] = status_code
+        
+        resultDetails["portal_pids_size"] = len(portal_pids)
+
+        t_portal_dataset_identifier_family = time.time()
+        pdif, resultDetails["es_result_size"] = self.getPortalDatasetIdentifierFamily(portal_pids)
+        
+        # Search body for Portal Metrics
+        search_body = [
+            {
+                "term": {"event.key": "read"}
+            },
+            {
+                "terms": {
+                    "pid.key": pdif
+                }
+            },
+            {
+                "exists": {
+                    "field": "sessionId"
+                }
+            },
+            {
+                "terms": {
+                    "formatType": [
+                        "DATA",
+                        "METADATA"
+                    ]
+                }
+            }
+        ]
+
+        # aggregation body for Portal Metrics
+        aggregation_body = {
+            "pid_list": {
+                "composite": {
+                    "sources": [
+                        {
+                            "format": {
+                                "terms": {
+                                    "field": "formatType"
+                                }
+                            }
+                        },
+                        {
+                            "month": {
+                                "date_histogram": {
+                                    "field": "dateLogged",
+                                    "interval": "month"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+
+        t_delta = time.time() - t_start
+        self.logger.debug('getMetricsPerPortal:t2=%.4f', t_delta)
+
+        t_es_start = time.time()
+
+        data = metrics_elastic_search.iterate_composite_aggregations(search_query=search_body,
+                                                                     aggregation_query=aggregation_body,
+                                                                     start_date=datetime.strptime(start_date,
+                                                                                                  '%m/%d/%Y'),
+                                                                     end_date=datetime.strptime(end_date, '%m/%d/%Y'))
+
+        return (self.formatDataPerPortal(data, pdif, start_date, end_date, resultDetails))
+
+
     def getPortalDatasetIdentifierFamily(self, portal_pids):
         """
             Gets the dataset identifier family for PIDs that belong to a specific potal
