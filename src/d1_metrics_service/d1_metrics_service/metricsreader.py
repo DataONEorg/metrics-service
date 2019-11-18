@@ -1329,7 +1329,7 @@ class MetricsReader:
         resultDetails["collection_query_time"] = time.time() - t_start
 
         t_portal_pids = time.time()
-
+        
         # Getting portal PIDs from Collection Query
         status_code, portal_pids = pid_resolution.resolveCollectionQuery(url = None, collectionQuery = collectionQuery)
         
@@ -1444,6 +1444,79 @@ class MetricsReader:
                 datasetIdentifierFamily.append(identifier)
         
         return(datasetIdentifierFamily, results[1])
+
+
+    def formatDataPerPortal(self, data, portal_pids, start_date, end_date, collectionDetails):
+        """
+        Formats the results retrieved from the Elastic Search and returns it as a HTTP response
+        :param data: the data retrieve from ES
+        :param citation_pids: PIDS to check the corresponding citations for
+        :param start_date: begin date range for the results
+        :param end_date: end date range for the results
+        :param collectionDetails: dictionary object with collection metadata
+        :return:
+            A tuple of formatted JSON response objects containing the metrics corresponding metadata.
+        """
+        results = {
+            "months": [],
+            "downloads": [],
+            "views": [],
+            "citations": [],
+        }
+
+        resultDetails = {}
+        resultDetails["citations"] = []
+        resultDetails["collectionQuery"] = collectionDetails
+
+        if len(portal_pids) == 0:
+            return results, resultDetails
+
+        # Getting the months between the two given dates:
+        start = datetime.strptime(start_date, "%m/%d/%Y")
+        end = datetime.strptime(end_date, "%m/%d/%Y")
+
+        # Getting a list of all the months possible for the user
+        # And initializing the corresponding metrics array
+        results["months"] = list(
+            OrderedDict(((start + timedelta(_)).strftime('%Y-%m'), None) for _ in range((end - start).days)).keys())
+        results["downloads"] = [0] * len(results["months"])
+        results["views"] = [0] * len(results["months"])
+        results["citations"] = [0] * len(results["months"])
+
+        # Gathering Citations
+        citationDict = {}
+        totalCitations, resultDetails["citations"] = self.gatherCitations(portal_pids)
+
+        for citationObject in resultDetails["citations"]:
+            if (citationObject["link_publication_date"][:7] in citationDict):
+                citationDict[citationObject["link_publication_date"][:7]] = citationDict[
+                                                                                citationObject["link_publication_date"][
+                                                                                :7]] + 1
+            else:
+                citationDict[citationObject["link_publication_date"][:7]] = 1
+
+        # Formatting the response from ES
+        for i in data["aggregations"]["pid_list"]["buckets"]:
+            months = datetime.utcfromtimestamp((i["key"]["month"] // 1000)).strftime(('%Y-%m'))
+            month_index = results["months"].index(months)
+            if i["key"]["format"] == "DATA":
+                results["downloads"][month_index] += i["doc_count"]
+            elif i["key"]["format"] == "METADATA":
+                results["views"][month_index] += i["doc_count"]
+            else:
+                pass
+
+        for months in citationDict:
+            if months in results["months"]:
+                month_index = results["months"].index(months)
+                results["citations"][month_index] = citationDict[months]
+            else:
+                results["months"].append(months)
+                results["views"].append(0)
+                results["downloads"].append(0)
+                results["citations"][month_index] = citationDict[months]
+
+        return results, resultDetails
 
 
 if __name__ == "__main__":
