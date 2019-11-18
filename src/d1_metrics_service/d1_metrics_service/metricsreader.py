@@ -6,18 +6,17 @@ Implemented as a falcon web application, https://falcon.readthedocs.io/en/stable
 
 """
 import json
-import falcon
-from urllib.parse import urlparse
-from urllib.parse import unquote
-from urllib.parse import quote_plus
-import requests
-from d1_metrics.metricselasticsearch import MetricsElasticSearch
-from d1_metrics.metricsdatabase import MetricsDatabase
-from datetime import datetime, timedelta
-from collections import OrderedDict
 import logging
 import time
+from collections import OrderedDict
+from datetime import datetime, timedelta
+from urllib.parse import quote_plus, unquote, urlparse
 
+import requests
+
+import falcon
+from d1_metrics.metricsdatabase import MetricsDatabase
+from d1_metrics.metricselasticsearch import MetricsElasticSearch
 from d1_metrics_service import pid_resolution
 
 DEFAULT_REPORT_CONFIGURATION={
@@ -41,6 +40,7 @@ class MetricsReader:
         self.request = {}
         self.response = {}
         self.logger = logging.getLogger('metrics_service.' + __name__)
+
 
     def on_get(self, req, resp):
         """
@@ -130,6 +130,10 @@ class MetricsReader:
             if (filter_type == "group") and interpret_as == "list":
                     # Called when generating metrics for a specific user
                     results, resultDetails = self.getMetricsPerGroup(filter_by[0]["values"])
+
+            if (filter_type == "portal") and interpret_as == "list":
+                    # Called when generating metrics for a specific portal
+                    results, resultDetails = self.getMetricsPerPortal(filter_by[0]["values"][0])
 
         self.response["results"] = results
         self.response["resultDetails"] = resultDetails
@@ -1291,8 +1295,44 @@ class MetricsReader:
                 return (pid_resolution.getResolvePIDs(temp_array))
 
 
+    def getPortalDatasetIdentifierFamily(self, portal_pids):
+        """
+            Gets the dataset identifier family for PIDs that belong to a specific potal
 
+            :param: portal_pids Array object of dataset identifiers for a given portal
+            :returns:
+                Array of aggregated dataset identifier family for the datasets belonging to a portal
+        """
+        # Basic init for required objects
+        t_start = time.time()
+        metrics_elastic_search = MetricsElasticSearch()
+        metrics_elastic_search.connect()
 
+        t_delta = time.time() - t_start
+        self.logger.debug('getPortalDatasetIdentifierFamily:t1=%.4f', t_delta)
+        datasetIdentifierFamily = []
+
+        search_query = {
+            "bool": {
+                "must": [
+                    {
+                        "terms": {
+                            "PID.keyword": portal_pids
+                        }
+                    }
+                ]
+            }
+        }
+
+        # Try searching the identifiers index for the datasetIdentifierFamily
+        results = metrics_elastic_search.getDatasetIdentifierFamily(search_query = search_query, index = "identifiers-2",  max_limit=99999)
+        breakAt = 0
+        
+        for i in results[0]:
+            for identifier in i["datasetIdentifierFamily"]:
+                datasetIdentifierFamily.append(identifier)
+        
+        return(datasetIdentifierFamily, results[1])
 
 
 if __name__ == "__main__":
