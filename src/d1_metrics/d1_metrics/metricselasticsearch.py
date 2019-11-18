@@ -227,6 +227,19 @@ class MetricsElasticSearch(object):
             {
               "term": { "beat.name": self._beatname }
             },
+          ],
+          "must_not": [
+            {
+              "terms": {
+                "tags" : [
+                  "ignore_ip",
+                  "machine_ua",
+                  "robot_ua",
+                  "dataone_ip",
+                  "robot_ip"
+                ]
+              }
+            }
           ]
         }
       }
@@ -247,6 +260,7 @@ class MetricsElasticSearch(object):
       if date_end is not None:
         date_filter["range"][MetricsElasticSearch.F_DATELOGGED]["lte"] = date_end.isoformat()
       search_body["query"]["bool"]["filter"] = date_filter
+    print(search_body)
     return search_body
 
 
@@ -949,7 +963,15 @@ class MetricsElasticSearch(object):
       "query": {
         "bool": {
           "must": [
-
+          ],
+          "must_not": [
+            {
+              "terms": {
+                "tags": [
+                  "robot_ip"
+                ]
+              }
+            }
           ],
           "filter": {
             "range": {
@@ -1005,6 +1027,7 @@ class MetricsElasticSearch(object):
     return aggregations
 
 
+
   def getDatasetIdentifierFamily(self, search_query, index="identifiers-2", max_limit=10):
     """
     Based on the search_query, query the ES to get the Dataset Identifier Family
@@ -1016,7 +1039,6 @@ class MetricsElasticSearch(object):
     search_body["_source"] = "datasetIdentifierFamily"
     search_body["query"] = search_query
     return self._getQueryResults(index, search_body, max_limit)
-
 
 
 # if __name__ == "__main__":
