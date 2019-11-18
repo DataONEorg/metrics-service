@@ -530,8 +530,8 @@ class MetricsDatabase(object):
         :return: JSON Object containing the metadata fields queried from Solr
         """
 
-        queryString = 'q=id:*' + q + '* OR id:*' + q.lower() + '* OR id:*' + q.upper() + 
-                      '* OR seriesId:*' + q + '* OR seriesId:*' + q.lower() + 
+        queryString = 'q=id:*' + q + '* OR id:*' + q.lower() + '* OR id:*' + q.upper() \
+                      + '* OR seriesId:*' + q + '* OR seriesId:*' + q.lower() + \
                       '* OR seriesId:*' + q.upper() + '*&fl=origin,authoritativeMN&wt=json'
 
         response = requests.get(url=self.solr_query_url, params=queryString)
