@@ -446,6 +446,58 @@ def getPortalCollectionQuery(url, portalLabel = None, pid = None, seriesId = Non
     return resp_json
 
 
+def resolveCollectionQuery(url = None, collectionQuery = "*:*"):
+  """
+    Queries SOLR to resolve the previously retieved collection Query.
+    :param: url
+    :param: collection query
+
+    :returns: 
+      status_code: response code for the SOLR request
+      resolved_collection_identifier: array object of the resolved collection identifiers
+  """
+  # Point to the CN SOLR endpoint by default
+  if url is None:
+    url = "https://cn.dataone.org/cn/v2/query/solr/?"
+  
+  session = requests.Session()
+  params = {'wt':(None,'json'),
+            'fl':(None,'id'),
+            'rows': (None, 10000)
+          }
+  resolved_collection_identifier = []
+
+  # unescape the escaped characters
+  collectionQuery = string_escape(collectionQuery)
+
+  params["q"] = (None, collectionQuery)
+
+  # performing a HTTP POST request to SOLR
+  response = session.post(url, files=params)
+  if response.status_code == requests.codes.ok:
+    resp_json = response.json()
+    
+    for doc in resp_json["response"]["docs"]:
+      resolved_collection_identifier.append(doc["id"])
+
+  return response.status_code, resolved_collection_identifier
+
+
+def string_escape(s, encoding='utf-8'):
+  """
+    Un-escaping the escaped strings
+
+      :param: s String to be unescaped
+      :param: 
+
+      :returns: Unescaped String
+  """
+  return (s.encode('latin1')         # To bytes, required by 'unicode-escape'
+            .decode('unicode-escape') # Perform the actual octal-escaping decode
+            .encode('latin1')         # 1:1 mapping back to bytes
+            .decode(encoding))        # Decode original encoding
+
+
 if __name__ == "__main__":
   from pprint import pprint
 
