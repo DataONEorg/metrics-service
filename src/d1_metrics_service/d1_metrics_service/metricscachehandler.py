@@ -58,6 +58,129 @@ class MetricsCacheHandler:
         self.logger.setLevel(logging.DEBUG)
 
 
+    def cache_update_job(self):
+        """
+            Performs Asynchronous Cache update job. Hits the Metrics-Service
+            end-point so Apache can handle the 
+        """
+        t_0 = time.time()
+        logger = self.logger
+        
+        
+        def _fetch(url, portal_label):
+            """
+                Queries the Apache endpoint to update cahce for a single portal
+
+                :param: portal label
+                :returns:
+                    Array object of portal label and corresponding response from the Metrics Service
+
+            """
+            time_fetch_init = time.time()
+            session = requests.Session()
+            retry = Retry(connect=3, backoff_factor=0.5)
+            adapter = HTTPAdapter(max_retries=retry)
+            session.mount('https://', adapter)
+
+            metrics_request = {
+                "metricsPage": {
+                    "total": 0,
+                    "start": 0,
+                    "count": 0
+                },
+                "metrics": [
+                    "citations",
+                    "downloads",
+                    "views"
+                ],
+                "filterBy": [
+                {
+                    "filterType": "portal",
+                    "values": [portal_label],
+                    "interpretAs": "list"
+                },
+                {
+                        "filterType": "month",
+                        "values": [
+                            "07/01/2012",
+                            datetime.today().strftime('%d/%m/%Y')
+                        ],
+                        "interpretAs": "range"
+                    }
+                ],
+                "groupBy": [
+                    "month"
+                ]
+            }
+            
+            # Formatting the query
+            metrics_request_str = json.dumps(metrics_request)
+            query = (metrics_request_str.replace(" ", "")).replace('"','%22')
+            metrics_query_url = url + "?metricsRequest=" + query
+
+            logger.info("Refreshing Cache for the label " + portal_label)
+            logger.debug(metrics_query_url)
+            response = session.get(metrics_query_url)
+            
+            logger.info("Cache refreshed for label %s in:  %fsec" , portal_label, time.time() - time_fetch_init)
+            response_json = json.loads(response.text)
+            return [portal_label, response_json["status_code"]]
+
+
+        async def _work(portal_labels_dict):
+            """
+                The async work function utilizes the private method _fetch to handle concurrent calls
+                to refresh the cache.
+
+                Args:
+                    portal_labels_dict: dictionary object retrieved from solr
+
+                Returns:
+                    None
+            """
+            with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as executor:
+                loop = asyncio.get_event_loop()
+                tasks = []
+
+                # Create an individual cache refresh task for every label retrieved from solr
+                for portal_pid in portal_labels_dict:
+                    label = portal_labels_dict[portal_pid]["label"]
+                    url = self._config["caching_end_point"]
+                    tasks.append(loop.run_in_executor(executor, _fetch, url, label ))
+                
+                # wait for the response from the server
+                for response in await asyncio.gather(*tasks):
+                    results[ response[0] ] = response[1]
+
+                    # handle the case when the response is not 200. report.
+                    if response[1] != 200:
+                        self.logger.error("Received an error for " + response[0] + " with response code " + str(response[1]))
+
+        results = {}
+        self.logger.info("Begining the caching process")
+        
+        # In a multithreading environment such as under gunicorn, the new thread created by
+        # gevent may not provide an event loop. Create a new one if necessary.
+        
+        try:
+        
+            loop = asyncio.get_event_loop()
+        
+        except RuntimeError as e:
+        
+            self.logger.info("Creating new event loop.")
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        portal_labels_dict = self.get_portal_labels()
+        future = asyncio.ensure_future(_work(portal_labels_dict))
+
+        loop.run_until_complete( future )
+        self.logger.info("Total Time Elapsed :%fsec", time.time()-t_0)
+
+        return None
+
+
     def get_portal_labels(self, solr_url = None, ):
         """
             Queries the SOLR endpoint to get the list of portals.
@@ -94,6 +217,7 @@ class MetricsCacheHandler:
             self.logger.error("Request got error code")
 
         return portal_label_dict
+
 
 
 if __name__ == "__main__":
