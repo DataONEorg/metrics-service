@@ -1036,7 +1036,7 @@ class MetricsElasticSearch(object):
     """
     search_body = {}
     counter = max_limit
-    search_body["_source"] = "datasetIdentifierFamily"
+    search_body["_source"] = ["PID", "datasetIdentifierFamily"]
     search_body["query"] = search_query
     return self._getQueryResults(index, search_body, max_limit)
 
