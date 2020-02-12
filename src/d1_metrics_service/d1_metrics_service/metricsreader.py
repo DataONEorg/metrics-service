@@ -10,6 +10,8 @@ import logging
 import time
 from collections import OrderedDict
 from datetime import datetime, timedelta
+from pytz import timezone
+import pytz
 from urllib.parse import quote_plus, unquote, urlparse
 
 import requests
@@ -53,6 +55,18 @@ class MetricsReader:
         #taking query parametrs from the HTTP GET request and forming metricsRequest Object
         self.logger.debug("enter on_get")
         metrics_request = {}
+
+        # Setting up the auto expiry time stamp for the caching requests
+        current_time = datetime.now()
+        tomorrow = current_time + timedelta(1)
+
+        # Setting the GMT offset to get the local time in Pacific
+        # Note: Day Light Savings time difference is not set
+        midnight = datetime(year=tomorrow.year, month=tomorrow.month, day=tomorrow.day, hour=7, minute=0, second=0)
+        secs = ((midnight - current_time).seconds)
+        
+        expiry_time = datetime.now() + timedelta(seconds=secs)
+
         query_param = urlparse(unquote(req.url))
 
         if ("=" in query_param.query):
@@ -65,6 +79,7 @@ class MetricsReader:
         # status returned by the framework, but it is included here to
         # illustrate how this may be overridden as needed.
         resp.status = falcon.HTTP_200
+        resp.set_headers({"Expires": expiry_time.strftime("%a, %d %b %Y %H:%M:%S GMT")})
         self.logger.debug("exit on_get")
 
 
