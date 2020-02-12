@@ -1350,8 +1350,7 @@ class MetricsReader:
         
         if status_code != 200:
             resultDetails["Error"] = "Can not resolve the collection query"
-            resultDetails["Status Code"] = status_code
-        
+        resultDetails["Status Code"] = status_code
         resultDetails["portal_pids_size"] = len(portal_pids)
 
         t_portal_dataset_identifier_family = time.time()
@@ -1500,13 +1499,12 @@ class MetricsReader:
 
         # Gathering Citations
         citationDict = {}
-        totalCitations, resultDetails["citations"] = self.gatherCitations(portal_pids)
+        totalCitations, citationsCollectionObject = self.gatherCitations(portal_pids)
 
-        for citationObject in resultDetails["citations"]:
+        for citationObject in citationsCollectionObject:
             if (citationObject["link_publication_date"][:7] in citationDict):
-                citationDict[citationObject["link_publication_date"][:7]] = citationDict[
-                                                                                citationObject["link_publication_date"][
-                                                                                :7]] + 1
+                citationDict[citationObject["link_publication_date"][:7]] = 
+                                    citationDict[citationObject["link_publication_date"][:7]] + 1
             else:
                 citationDict[citationObject["link_publication_date"][:7]] = 1
 
@@ -1531,10 +1529,67 @@ class MetricsReader:
                 results["downloads"].append(0)
                 results["citations"][month_index] = citationDict[months]
 
+        # Returning citations in resultDetails object
+        targetSourceDict = {}
+        for i in citationsCollectionObject:
+            if i["source_id"] not in targetSourceDict:
+                targetSourceDict[i["source_id"]] = {}
+                targetSourceDict[i["source_id"]]["target_id"] = []
+                targetSourceDict[i["source_id"]]["target_id"].append(i["target_id"])
+            else:
+                targetSourceDict[i["source_id"]]["target_id"].append(i["target_id"])
+            for k,v in i.items():
+                if k != "target_id":
+                    targetSourceDict[i["source_id"]][k] = v
+            targetSourceDict[i["source_id"]]["citationMetadata"] = {}
+
+        for i in targetSourceDict:
+            targetSourceDict[i]["citationMetadata"] = self.getCitationSourceMetadata(targetSourceDict[i]["target_id"])
+        resultDetails["citations"] = targetSourceDict
+
         return results, resultDetails
+
+
+    def getCitationSourceMetadata(self, PIDs):
+        """
+        Queries SOLR to get CITED Target Dataset metadata
+        """
+
+        for i in range(len(PIDs)):
+            if PIDs[i].startswith("10.3",0,3):
+                PIDs[i] = "doi:" + PIDs[i]
+                
+
+        query = 'identifier:("' + '" OR "'.join(PIDs) + '") AND formatType:METADATA&fl=id,origin,title,datePublished,dateUploaded,dateModified,&wt=json'
+        solr_query_url = self._config["solr_query_url"] + "?q=" + query
+        
+        # sending get request and saving the response as response object 
+        r = requests.get(url = solr_query_url) 
+        
+        # extracting data in json format 
+        if r.status_code == 200:
+            data = json.loads(r.text)
+            dataObject = {}
+            for i in data["response"]["docs"]:
+                dataObject[i["id"]] = {}
+                dataObject[i["id"]]["origin"] = i["origin"]
+                dataObject[i["id"]]["title"] = i["title"]
+                try:
+                    dataObject[i["id"]]["datePublished"] = i["datePublished"]
+                except KeyError as e:
+                    try:
+                        dataObject[i["id"]]["datePublished"] = i["dateUploaded"]
+                    except KeyError as e:
+                        pass
+
+            return dataObject
+        
+        return solr_query_url
+
 
 
 if __name__ == "__main__":
     mr = MetricsReader()
     # mr.resolvePIDs(["doi:10.5065/D6BG2KW9"])
     mr.getDatasetIdentifierFamily("user", "http://orcid.org/0000-0002-0381-3766")
+
