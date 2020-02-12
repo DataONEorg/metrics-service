@@ -31,7 +31,7 @@ DEFAULT_CACHE_CONFIGURATION={
     "cn_solr_url": "https://cn.dataone.org/cn/v2/query/solr/",
     "cn_stage_solr_url": "https://cn-stage.test.dataone.org/cn/v2/query/solr/",
     "dev_solr_url": "https://dev.nceas.ucsb.edu/knb/d1/mn/v2/query/solr/",
-    "caching_end_point": "https://handy-owl.nceas.ucsb.edu/apacheTest/metrics",
+    "caching_end_point": "https://logproc-stage-ucsb-1.test.dataone.org/test/metrics",
 }
 
 # List of characters that should be escaped in solr query terms
@@ -53,9 +53,12 @@ class MetricsCacheHandler:
         Default init
         """
         self._config = DEFAULT_CACHE_CONFIGURATION
-        logging.basicConfig()
-        self.logger = logging.getLogger('metrics_service.' + __name__)
-        self.logger.setLevel(logging.DEBUG)
+        logging.basicConfig(filename='/var/log/metrics-service/cache.log',
+                            filemode='a',
+                            format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
+                            datefmt='%H:%M:%S',
+                            level=logging.INFO)
+        self.logger = logging.getLogger('metrics_cache_handler')
 
 
     def cache_update_job(self):
@@ -66,65 +69,63 @@ class MetricsCacheHandler:
         t_0 = time.time()
         logger = self.logger
         
-        
+
         def _fetch(url, portal_label):
-            """
-                Queries the Apache endpoint to update cahce for a single portal
-
-                :param: portal label
-                :returns:
-                    Array object of portal label and corresponding response from the Metrics Service
-
-            """
             time_fetch_init = time.time()
             session = requests.Session()
             retry = Retry(connect=3, backoff_factor=0.5)
             adapter = HTTPAdapter(max_retries=retry)
             session.mount('https://', adapter)
 
-            metrics_request = {
-                "metricsPage": {
-                    "total": 0,
-                    "start": 0,
-                    "count": 0
-                },
-                "metrics": [
+            headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.108 Safari/537.36'}
+
+            # Defining the request object
+            metrics_request = OrderedDict()
+            
+            filterBy_label = OrderedDict()
+            filterBy_label["filterType"] = "portal"
+            filterBy_label["values"] = [portal_label]
+            filterBy_label["interpretAs"] = "list"
+
+            filterBy_time = OrderedDict()
+            filterBy_time["filterType"] = "month"
+            filterBy_time["values"] = [
+                            "01/01/2012",
+                            datetime.today().strftime('%m/%d/%Y')
+                        ]
+            filterBy_time["interpretAs"] = "range"
+            
+            metricsPage = OrderedDict()
+            metricsPage["total"] = 0
+            metricsPage["start"] = 0
+            metricsPage["count"] = 0
+
+            metrics_request["metricsPage"] = metricsPage
+            metrics_request["metrics"] = [
                     "citations",
                     "downloads",
                     "views"
-                ],
-                "filterBy": [
-                {
-                    "filterType": "portal",
-                    "values": [portal_label],
-                    "interpretAs": "list"
-                },
-                {
-                        "filterType": "month",
-                        "values": [
-                            "07/01/2012",
-                            datetime.today().strftime('%d/%m/%Y')
-                        ],
-                        "interpretAs": "range"
-                    }
-                ],
-                "groupBy": [
+                ]
+            metrics_request["filterBy"] = [
+                filterBy_label,
+                filterBy_time
+                ]
+            metrics_request["groupBy"] = [
                     "month"
                 ]
-            }
-            
+
             # Formatting the query
             metrics_request_str = json.dumps(metrics_request)
             query = (metrics_request_str.replace(" ", "")).replace('"','%22')
             metrics_query_url = url + "?metricsRequest=" + query
 
-            logger.info("Refreshing Cache for the label " + portal_label)
+            logger.debug("Refreshing Cache for the label " + portal_label)
             logger.debug(metrics_query_url)
-            response = session.get(metrics_query_url)
+            response = session.get(metrics_query_url, headers=headers)
             
             logger.info("Cache refreshed for label %s in:  %fsec" , portal_label, time.time() - time_fetch_init)
-            response_json = json.loads(response.text)
-            return [portal_label, response_json["status_code"]]
+            logging.info('\n')
+            return [portal_label, response.status_code]
 
 
         async def _work(portal_labels_dict):
@@ -146,8 +147,8 @@ class MetricsCacheHandler:
                 for portal_pid in portal_labels_dict:
                     label = portal_labels_dict[portal_pid]["label"]
                     url = self._config["caching_end_point"]
-                    tasks.append(loop.run_in_executor(executor, _fetch, url, label ))
-                
+                    tasks.append(loop.run_in_executor(executor, _fetch, url, label )) 
+ 
                 # wait for the response from the server
                 for response in await asyncio.gather(*tasks):
                     results[ response[0] ] = response[1]
@@ -229,18 +230,16 @@ class MetricsCacheHandler:
         """
         
         schedule.every().day.at("00:30").do(self.cache_update_job())
-        
+
         while True:
             self.logger.info("Performing Cache Refresh")
             schedule.run_pending()
             time.sleep(60)
 
 
-
 if __name__ == "__main__":
     cache_handler = MetricsCacheHandler()
-    # cache_handler.perform_cache_refresh()
-    cache_handler.cache_update_job()
-    # cache_handler.get_portal_labels()
+    cache_handler.perform_cache_refresh()
+    # cache_handler.cache_update_job()
 
 
