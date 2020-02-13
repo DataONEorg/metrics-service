@@ -1523,6 +1523,9 @@ class MetricsReader:
             if months in results["months"]:
                 month_index = results["months"].index(months)
                 results["citations"][month_index] = citationDict[months]
+            # Fixing citations that are manually added by DataONE team
+            elif (months is None) or (months == "NULL"):
+                results["citations"][-1] = citationDict[months]
             else:
                 results["months"].append(months)
                 results["views"].append(0)
