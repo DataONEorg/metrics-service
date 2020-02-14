@@ -350,7 +350,7 @@ def getQuery(src_file=DEFAULT_LOG, tstamp=None):
   if tstamp is None:
     tstamp = datetime.datetime.utcnow()
   date_to = tstamp.strftime(fmt)
-  date_from = datetime.datetime(year=2012, month=7, day=1, hour=0, minute=0, second=0)
+  date_from = datetime.datetime(year=2000, month=1, day=1, hour=0, minute=0, second=0)
   log_entries = getLastLinesFromFile(src_file)
   # trim the entries, note that only the log data is returned in the list
   log_entries = trimLogEntries(log_entries, LOG_DATE_FIELD)
