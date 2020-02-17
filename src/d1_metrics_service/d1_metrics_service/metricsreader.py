@@ -1503,8 +1503,7 @@ class MetricsReader:
 
         for citationObject in citationsCollectionObject:
             if (citationObject["link_publication_date"][:7] in citationDict):
-                citationDict[citationObject["link_publication_date"][:7]] = 
-                                    citationDict[citationObject["link_publication_date"][:7]] + 1
+                citationDict[citationObject["link_publication_date"][:7]] = citationDict[citationObject["link_publication_date"][:7]] + 1
             else:
                 citationDict[citationObject["link_publication_date"][:7]] = 1
 
