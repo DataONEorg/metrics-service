@@ -19,6 +19,7 @@ DEFAULT_ELASTIC_CONFIG = {
   "host":"localhost",
   "port":9200,
   "index":"eventlog-1",
+  "request_timeout":30,
   }
 
 class MetricsElasticSearch(object):
