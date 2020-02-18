@@ -968,6 +968,10 @@ class MetricsElasticSearch(object):
             {
               "terms": {
                 "tags": [
+                  "ignore_ip",
+                  "machine_ua",
+                  "robot_ua",
+                  "dataone_ip",
                   "robot_ip"
                 ]
               }
