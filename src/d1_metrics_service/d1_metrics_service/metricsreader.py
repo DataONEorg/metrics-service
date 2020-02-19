@@ -1450,7 +1450,7 @@ class MetricsReader:
         }
 
         # Try searching the identifiers index for the datasetIdentifierFamily
-        results = metrics_elastic_search.getDatasetIdentifierFamily(search_query = search_query, index = "identifiers-2",  max_limit=99999)
+        results = metrics_elastic_search.getDatasetIdentifierFamily(search_query = search_query, index = "identifiers-2",  max_limit=10000)
         breakAt = 0
         
         for i in results[0]:
