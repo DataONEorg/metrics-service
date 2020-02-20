@@ -4,9 +4,9 @@ Implements a wrapper for the metrics reporting service.
 
 from elasticsearch import Elasticsearch
 from elasticsearch import helpers
-
 import argparse
 import sys
+import time
 import requests
 import json
 import urllib.request
@@ -18,6 +18,13 @@ from d1_metrics.metricselasticsearch import MetricsElasticSearch
 from collections import Counter
 from dateutil.relativedelta import relativedelta
 import logging
+import gzip
+import shutil
+import asyncio
+from aiohttp import ClientSession
+import concurrent.futures
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 
 DEFAULT_REPORT_CONFIGURATION={
     "report_url" : "https://api.datacite.org/reports",
@@ -28,11 +35,16 @@ DEFAULT_REPORT_CONFIGURATION={
     "solr_query_url": "https://cn.dataone.org/cn/v2/query/solr/"
 }
 
+CONCURRENT_REQUESTS = 10  #max number of concurrent requests to run
 
 class MetricsReporter(object):
 
     def __init__(self):
         self._config = DEFAULT_REPORT_CONFIGURATION
+
+        self.es = MetricsElasticSearch()
+        self.es.connect()
+
         self.logger = logging.getLogger('metrics_reporting_service.' + __name__)
         self.logger.setLevel(logging.DEBUG)
 
@@ -54,26 +66,43 @@ class MetricsReporter(object):
         self.logger.addHandler(ch)
 
 
-    def report_handler(self, start_date, end_date, node, unique_pids):
+    def report_handler(self, start_date, end_date, node, doi_dict, perform_put=None):
         """
         Creates a Report JSON object, dumps it to a file and sends the report to the Hub.
         This is a handler function that manages the entire work flow
         :param start_date:
         :param end_date:
         :param: node
-        :param: unique_pids
+        :param: doi_dict
         :return: None
         """
         json_object = {}
-        json_object["report-header"] = self.get_report_header(start_date, end_date, node)
-        json_object["report-datasets"] = self.get_report_datasets(start_date, end_date, unique_pids, node)
-        with open('./reports/' + ("DSR-D1-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d'))+ "-" + node+'.json', 'w') as outfile:
-            json.dump(json_object, outfile, indent=2,ensure_ascii=False)
-        response = self.send_reports(start_date, end_date, node)
-        return response
 
 
-    def get_report_header(self, start_date, end_date, node):
+        large_report = False
+        if len(doi_dict) > 2000:
+            large_report = True
+
+        json_object["report-header"] = self.get_report_header(start_date, end_date, node, large_report)
+        report_datasets = self.get_async_report_datasets(start_date, end_date, node, doi_dict)
+
+        if report_datasets:
+            json_object["report-datasets"] = self.get_async_report_datasets(start_date, end_date, node, doi_dict)
+
+            with open('./reports/' + ("DSR-D1-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d'))+ "-" + node+'.json', 'w') as outfile:
+                json.dump(json_object, outfile, indent=2, ensure_ascii=False)
+
+            if len(doi_dict) > 2000:
+                response = response = self.send_reports(start_date, end_date, node, perform_put, compressed=large_report)
+            else:
+                response = response = self.send_reports(start_date, end_date, node, perform_put, compressed=large_report)
+
+            return response
+
+        return None
+
+
+    def get_report_header(self, start_date, end_date, node, large_report):
         """
         Generates a unique report header
         :param start_date:
@@ -93,62 +122,20 @@ class MetricsReporter(object):
         report_header["report-filters"] = []
         report_header["report-attributes"] = []
 
+        if large_report:
+            report_header["exceptions"] = [
+                {
+                    "code": 69,
+                    "severity": "warning",
+                    "message": "Report is compressed using gzip",
+                    "help-url": "https://github.com/datacite/sashimi",
+                    "data": "usage data needs to be uncompressed"
+                }
+            ]
+        else:
+            report_header["exceptions"] = []
+
         return (report_header)
-
-
-    def get_unique_pids(self, start_date, end_date, node, doi=False):
-        """
-        Queries ES for the given time period and returns the set of pids
-        :param start_date:
-        :param end_date:
-        :param: node
-        :return: SET object of pids for a given time range. (Always unique - because it is a set!)
-        """
-        metrics_elastic_search = MetricsElasticSearch()
-        metrics_elastic_search.connect()
-        pid_list = []
-        unique_pids = []
-        query = [
-            {
-                "terms": {
-                    "formatType": [
-                        "METADATA"
-                    ]
-                }
-            },
-            {
-
-                "term": {"event.key": "read"}
-            },
-            {
-                "term": {"nodeId": node}
-            },
-            {
-                "exists": {
-                    "field": "sessionId"
-                }
-            }
-        ]
-
-        # Just search for DOI string in to send it to the HUB
-        if(doi):
-            DOIWildcard = {}
-            DOIWildcard["wildcard"] = {"pid.key": "*doi*"}
-            query.append(DOIWildcard)
-
-        fields = "pid"
-        results, total = metrics_elastic_search.getSearches(limit=1000000, q = query, date_start=datetime.strptime(start_date,'%m/%d/%Y')\
-                                                     , date_end=datetime.strptime(end_date,'%m/%d/%Y'), fields=fields)
-
-        for i in range(total):
-            pid_list.append(results[i]["pid"])
-
-        for i in pid_list:
-            if i not in unique_pids:
-                unique_pids.append(i)
-
-        return (unique_pids)
-
 
 
     def generate_instances(self, start_date, end_date, pid_list):
@@ -158,8 +145,6 @@ class MetricsReporter(object):
         :param end_date:
         :return:
         """
-        metrics_elastic_search = MetricsElasticSearch()
-        metrics_elastic_search.connect()
         report_instances = {}
         search_body = [
             {
@@ -199,7 +184,8 @@ class MetricsReporter(object):
                         {
                             "country": {
                                 "terms": {
-                                    "field": "geoip.country_code2.keyword"
+                                    "field": "geoip.country_code2.keyword",
+                                    "missing_bucket":"true"
                                 }
                             }
                         },
@@ -214,12 +200,14 @@ class MetricsReporter(object):
                 }
             }
         }
-        data = metrics_elastic_search.iterate_composite_aggregations(search_query=search_body, aggregation_query = aggregation_body,\
+        data = self.es.iterate_composite_aggregations(search_query=search_body, aggregation_query = aggregation_body,\
                                                                      start_date=datetime.strptime(start_date,'%m/%d/%Y'),\
                                                                      end_date=datetime.strptime(end_date,'%m/%d/%Y'))
 
 
         for i in data["aggregations"]["pid_list"]["buckets"]:
+            if i["key"]["country"] is None:
+                i["key"]["country"] = "n/a"
             if(i["key"]["format"] == "METADATA"):
                 if "METADATA" in report_instances:
                     report_instances["METADATA"]["unique_investigations"] = report_instances["METADATA"]["unique_investigations"] + 1
@@ -320,49 +308,64 @@ class MetricsReporter(object):
         return report_instances
 
 
-
-    def get_report_datasets(self, start_date, end_date, unique_pids, node ):
+    def get_async_report_datasets(self, start_date, end_date, node, doi_dict):
         """
+        Generates asynchronous dataset instances.
 
         :param start_date:
+            Start date of the report
         :param end_date:
-        :param: unique_pids
+            End date of the report
         :param: node
-        :return:
-        """
-        metrics_elastic_search = MetricsElasticSearch()
-        metrics_elastic_search.connect()
-        report_datasets = []
-        pid_list = []
+            Node identifier for the logs from ES
+        :param: doi_dict
+            Dictionary object with dois and their datasetIdentifierFamily
 
+        :return: list object
+            list of dataset instances as defined in SUSHI format
+        """
+
+        time_beg = time.time()
 
         count = 0
-        nodeName = self.resolve_MN(node)
-        self.logger.debug("Processing " + str(len(unique_pids)) + " datasets for node " + node)
-        for pid in unique_pids:
-            count = count + 1
-            if((count % 100 == 0) or (count == 1) or (count == len(unique_pids))) :
-                self.logger.debug(str(count) + " of "  + str(len(unique_pids)))
+        mn_dict = self.get_MN_Dict()
+        nodeName = mn_dict[node]
 
+        def _get_single_dataset_instance(self, doi, pid_list):
+            """
+            Generartes a single instance of dataset object
+
+            :param self:
+                The self object
+            :param doi:
+                The doi for the dataset
+            :param pid_list:
+                `datasetIdentifierFamily` for this doi
+
+            :return: dictionary object
+                a single dataset instance as defined in SUSHI format
+            """
 
             dataset = {}
+            pid = pid_list[0]
             solr_response = self.query_solr(pid)
-            if(solr_response["response"]["numFound"] > 0):
+            if (solr_response["response"]["numFound"] > 0):
 
                 if ("title" in (i for i in solr_response["response"]["docs"][0])):
                     dataset["dataset-title"] = solr_response["response"]["docs"][0]["title"]
                 else:
-                    dataset["dataset-title"] = ""
+                    return None
 
                 if ("authoritativeMN" in (i for i in solr_response["response"]["docs"][0])):
-                    dataset["publisher"] = self.resolve_MN(solr_response["response"]["docs"][0]["authoritativeMN"])
+                    dataset["publisher"] = mn_dict[solr_response["response"]["docs"][0]["authoritativeMN"]]
                 else:
                     dataset["publisher"].append(
                         {"type": "urn", "value": nodeName})
 
                 if ("authoritativeMN" in (i for i in solr_response["response"]["docs"][0])):
                     dataset["publisher-id"] = []
-                    dataset["publisher-id"].append({"type":"urn", "value" :solr_response["response"]["docs"][0]["authoritativeMN"]})
+                    dataset["publisher-id"].append(
+                        {"type": "urn", "value": solr_response["response"]["docs"][0]["authoritativeMN"]})
                 else:
                     dataset["publisher-id"].append(
                         {"type": "urn", "value": node})
@@ -377,15 +380,17 @@ class MetricsReporter(object):
 
                 if ("datePublished" in (i for i in solr_response["response"]["docs"][0])):
                     dataset["dataset-dates"] = []
-                    dataset["dataset-dates"].append({"type": "pub-date", "value" :solr_response["response"]["docs"][0]["datePublished"][:10]})
+                    dataset["dataset-dates"].append(
+                        {"type": "pub-date", "value": solr_response["response"]["docs"][0]["datePublished"][:10]})
                 else:
                     dataset["dataset-dates"] = []
-                    dataset["dataset-dates"].append({"type": "pub-date", "value" :solr_response["response"]["docs"][0]["dateUploaded"][:10]})
+                    dataset["dataset-dates"].append(
+                        {"type": "pub-date", "value": solr_response["response"]["docs"][0]["dateUploaded"][:10]})
 
-                if "doi" in pid:
-                    dataset["dataset-id"] = [{"type": "doi", "value": pid}]
+                if doi:
+                    dataset["dataset-id"] = [{"type": "doi", "value": doi}]
                 else:
-                    continue
+                    return None
                     # dataset["dataset-id"] = [{"type": "other-id", "value": pid}]
 
                 dataset["yop"] = dataset["dataset-dates"][0]["value"][:4]
@@ -399,13 +404,10 @@ class MetricsReporter(object):
                 performance = {}
 
                 performance["period"] = {}
-                performance["period"]["begin-date"] = (datetime.strptime(start_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
-                performance["period"]["end-date"] = (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')
+                performance["period"]["begin-date"] = (datetime.strptime(start_date, '%m/%d/%Y')).strftime('%Y-%m-%d')
+                performance["period"]["end-date"] = (datetime.strptime(end_date, '%m/%d/%Y')).strftime('%Y-%m-%d')
 
                 instance = []
-                pid_list = []
-                pid_list.append(pid)
-                pid_list = self.resolvePIDs(pid_list)
 
                 report_instances = self.generate_instances(start_date, end_date, pid_list)
 
@@ -413,17 +415,18 @@ class MetricsReporter(object):
                     total_dataset_investigation = {"count": report_instances["METADATA"]["total_investigations"],
                                                    "access-method": "regular",
                                                    "metric-type": "total-dataset-investigations",
-                                                   "country-counts": report_instances["METADATA"]["country_total_investigations"]}
+                                                   "country-counts": report_instances["METADATA"][
+                                                       "country_total_investigations"]}
 
                     unique_dataset_investigation = {"count": report_instances["METADATA"]["unique_investigations"],
                                                     "access-method": "regular",
                                                     "metric-type": "unique-dataset-investigations",
-                                                    "country-counts": report_instances["METADATA"]["country_unique_investigations"]}
+                                                    "country-counts": report_instances["METADATA"][
+                                                        "country_unique_investigations"]}
                     instance.append(total_dataset_investigation)
                     instance.append(unique_dataset_investigation)
 
-
-                if("DATA" in report_instances):
+                if ("DATA" in report_instances):
                     total_dataset_requests = {"count": report_instances["DATA"]["total_requests"],
                                               "access-method": "regular",
                                               "metric-type": "total-dataset-requests",
@@ -436,97 +439,140 @@ class MetricsReporter(object):
                     instance.append(total_dataset_requests)
                     instance.append(unique_dataset_requests)
 
+                for i in instance:
+                    if "n/a" in i["country-counts"]:
+                        i["country-counts"].pop("n/a", None)
+
                 performance["instance"] = instance
 
                 dataset["performance"].append(performance)
 
             else:
-                continue
+                return None
 
-            report_datasets.append(dataset)
+            return dataset
+
+        async def _work_get_all_datasets_instances(self, doi_dict):
+            """
+            For all the PIDs in the doi_dict, create async jobs and execute them concurrently
+
+            :param self:
+                Class object
+            :param doi_dict:
+                Dictionary of `doi` as key and `datasetIdentifierFamily` as value
+
+            :return:
+                None
+            """
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as executor:
+                self.logger.info("self.async init : %f sec", time.time() - time_beg)
+                loop = asyncio.get_event_loop()
+                tasks = []
+
+                for pid, pid_list in doi_dict.items():
+                    tasks.append(loop.run_in_executor(executor, _get_single_dataset_instance, self, pid, pid_list))
+
+                for response in await asyncio.gather(*tasks):
+                    if len(tasks) % 100 == 0:
+                        self.logger.info(len(tasks))
+                    if response is not None:
+                        report_datasets.append(response)
+
+                self.logger.info("self.async end : %f sec", time.time() - time_beg)
+
+        report_datasets = []
+
+        self.logger.info("self.get_es_unique_dois : %f sec", time.time() - time_beg)
+        self.logger.debug("Processing " + str(len(doi_dict)) + " datasets for node " + node)
+
+        # In a multithreading environment such as under gunicorn, the new thread created by
+        # gevent may not provide an event loop. Create a new one if necessary.
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError as e:
+            _L.info("Creating new event loop.")
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        future = asyncio.ensure_future(_work_get_all_datasets_instances(self, doi_dict))
+        loop.run_until_complete(future)
+
+        if len(report_datasets) < 1:
+            return None
+
+        self.logger.info("total : %f sec", time.time() - time_beg)
 
         return (report_datasets)
 
 
-    def resolve_MN(self, authoritativeMN):
+    def send_reports(self, start_date, end_date, node, perform_put=None, compressed=False):
         """
-        Queries the Node endpoint to retrieve the details about the authoritativeMN
-        :param authoritativeMN:
-        :return: String value of the name of the authoritativeMN
-        """
-        node_url = "https://cn.dataone.org/cn/v2/node/" + authoritativeMN
-        resp = requests.get(node_url, stream=True)
-        root = ElementTree.fromstring(resp.content)
-        name = root.find('name').text
-        return name
+        Sends reports to the Hub at the specified Hub report url in the config parameters.
 
+        The DataCite HUB has a limit on the number of dataset instance that it can inject.
+        If ther reports are too large, it gives errors while injesting the reports.
 
-    def resolvePIDs(self, PIDs):
-        """
-        Checks for the versions and obsolecence chain of the given PID
-        :param PID:
-        :return: A list of pids for previous versions and their data + metadata objects
-        """
+        To handle cases with large reports the `compressed` parameters should be set to True.
 
-        # get the ids for all the previous versions and their data / metadata object till the current `pid` version
-        # p.s. this might not be the latest version!
-        callSolr = True
+        :param: start_date
+            String object representing the beginning of the report
 
-        while (callSolr):
+        :param: end_date
+            String object representing the end interval of the report
 
-            # Querying for all the PIDs that we got from the previous iteration
-            # Would be a single PID if this is the first iteration.
-            identifier = '(("' + '") OR ("'.join(PIDs) + '"))'
+        :param: node
+            The corresponding node to which the report belong to
 
-            # Forming the query dictionary to be sent as a file to the Solr endpoint via the HTTP Post request.
-            queryDict =  {}
-            queryDict["fq"] = (None, 'id:' + identifier)
-            queryDict["fl"] =  (None, 'id,documents,documentedBy,obsoletes,resourceMap')
-            queryDict["wt"] = (None, "json")
+        :param: compressed
+            A boolean parameter that represents whether to send zipped reports or not
 
-            # Getting length of the array from previous iteration to control the loop
-            prevLength = len(PIDs)
-
-            resp = requests.post(url=self._config["solr_query_url"], files=queryDict)
-
-            if(resp.status_code == 200):
-
-                response = resp.json()
-
-                for doc in response["response"]["docs"]:
-                    # Checks if the pid has any data / metadata objects
-                    if "documents" in doc:
-                        for j in doc["documents"]:
-                            if j not in PIDs:
-                                PIDs.append(j)
-
-                    # Checks for the previous versions of the pid
-                    if "obsoletes" in doc:
-                        if doc["obsoletes"] not in PIDs:
-                            PIDs.append(doc["obsoletes"])
-
-                    # Checks for the resource maps of the pid
-                    if "resourceMap" in doc:
-                        for j in doc["resourceMap"]:
-                            if j not in PIDs:
-                                PIDs.append(j)
-
-            if (prevLength == len(PIDs)):
-                callSolr = False
-        return PIDs
-
-
-    def send_reports(self,  start_date, end_date, node):
-        """
-        Sends report to the Hub at the specified Hub report url in the config parameters
-        :return: Nothing
+        :return: response
+            A HTTP reponse object reporesenting the status of the sent zipped report
         """
         s = requests.session()
-        s.headers.update(
-            {'Authorization': "Bearer " +  self._config["auth_token"], 'Content-Type': 'application/json', 'Accept': 'application/json'})
-        with open("./reports/DSR-D1-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')+ "-" + node+'.json', 'r') as content_file:
-            content = content_file.read()
-        response = s.post(self._config["report_url"], data=content.encode("utf-8"))
+
+        name = "./reports/DSR-D1-" + (datetime.strptime(end_date,'%m/%d/%Y')).strftime('%Y-%m-%d')+ "-" + node
+
+        if compressed:
+
+            s.headers.update(
+                {'Authorization': "Bearer " +  self._config["auth_token"], 'Content-Type': 'application/gzip', 'Accept': 'gzip', 'Content-Encoding': 'gzip'})
+
+            with open(name + ".json", 'r') as content_file:
+                # JSON large object data
+                jlob = content_file.read()
+
+                # JSON large object bytes
+                jlob = jlob.encode("utf-8")
+
+                with open(name + ".gzip", mode="wb") as f:
+                    f.write(jlob)
+
+            if perform_put:
+                self.logger.info("Performing PUT")
+                response = s.put(self._config["report_url"] + "/" + perform_put, data=gzip.compress(jlob))
+
+            response = s.post(self._config["report_url"], data=gzip.compress(jlob))
+
+        else:
+            s.headers.update(
+                {'Authorization': "Bearer " + self._config["auth_token"], 'Content-Type': 'application/json',
+                 'Accept': 'application/json'})
+
+            with open(name + '.json', 'r') as content_file:
+                content = content_file.read()
+
+            if perform_put:
+                self.logger.info("Performing PUT")
+                response = s.put(self._config["report_url"] + "/" + perform_put, data=content.encode("utf-8"))
+
+            response = s.post(self._config["report_url"], data=content.encode("utf-8"))
+
+        self.logger.info(response)
+        self.logger.info(str(response.status_code) + " " + response.reason)
+        self.logger.info("Headers: " + str(response.headers))
+        self.logger.info("Content: " + str((response.content).decode("utf-8")))
 
         return response
 
@@ -538,8 +584,14 @@ class MetricsReporter(object):
         :return: JSON Object containing the metadata fields queried from Solr
         """
 
+        session = requests.Session()
+        retry = Retry(connect=3, backoff_factor=0.5)
+        adapter = HTTPAdapter(max_retries=retry)
+        session.mount('http://', adapter)
+        session.mount('https://', adapter)
+
         queryString = 'q=id:"' + PID + '"&fl=origin,title,datePublished,dateUploaded,authoritativeMN,dataUrl&wt=json'
-        response = requests.get(url = self._config["solr_query_url"], params = queryString)
+        response = session.get(url = self._config["solr_query_url"], params = queryString)
 
         return response.json()
 
@@ -550,15 +602,17 @@ class MetricsReporter(object):
         Probably would be called only once in its lifetime
         :return: None
         """
-        mn_list = self.get_MN_List()
-        for node in mn_list:
-            date = datetime(2013, 1, 1)
-            stopDate = datetime(2013, 12, 31)
+        mn_dict = self.get_MN_Dict()
+        for node, nodeName in mn_dict.items():
+            self.logger.debug("Running job for Node: " + node)
+
+            date = datetime(2012, 6, 30)
+            stopDate = datetime(2014, 12, 31)
+
+            jobs_done = self.get_jobs_done(node)
 
             count = 0
             while (date.strftime('%Y-%m-%d') != stopDate.strftime('%Y-%m-%d')):
-                self.logger.debug("Running job for Node: " + node)
-
                 count = count + 1
 
                 prevDate = date + timedelta(days=1)
@@ -567,21 +621,30 @@ class MetricsReporter(object):
                 start_date, end_date = prevDate.strftime('%m/%d/%Y'),\
                              date.strftime('%m/%d/%Y')
 
+                perform_put = None
+                job_done_date = prevDate.strftime('%Y-%m-%d')
+                if job_done_date in jobs_done:
+                    perform_put = jobs_done[job_done_date]
 
 
+                orignial_doi_dict = self.get_es_unique_dois(start_date, end_date, nodeId = node)
 
-                unique_pids = self.get_unique_pids(start_date, end_date, node, doi=True)
+                doi_dict = {k: orignial_doi_dict[k] for k in list(orignial_doi_dict)[:100]}
 
-                if (len(unique_pids) > 0):
-                    self.logger.debug("Job " + " : " + start_date + " to " + end_date)
+                if (len(doi_dict) > 0):
+                    self.logger.info("Job " + " : " + start_date + " to " + end_date)
 
                     # Uncomment me to send reports to the HUB!
-                    response = self.report_handler(start_date, end_date, node, unique_pids)
+                    response = self.report_handler(start_date, end_date, node, doi_dict, perform_put)
 
+                    if response is None:
+                        self.logger.info(
+                            "Skipping job for " + node + " " + start_date + " to " + end_date + " - no datasets to submit!")
+                        continue
 
                     logentry = "Node " + node + " : " + start_date + " to " + end_date + " === " + str(response.status_code)
 
-                    self.logger.debug(logentry)
+                    self.logger.info(logentry)
 
                     if response.status_code != 201:
 
@@ -592,45 +655,266 @@ class MetricsReporter(object):
                         self.logger.error("Headers: " + str(response.headers))
                         self.logger.error("Content: " + str((response.content).decode("utf-8")))
                 else:
-                    self.logger.debug(
+                    self.logger.info(
                         "Skipping job for " + node + " " + start_date + " to " + end_date + " - length of PIDS : " + str(
-                            len(unique_pids)))
+                            len(doi_dict)))
+
 
     def last_day_of_month(self, date):
+        """
+        Returns the last day of the month for report generation
+
+        :param date:
+            A date object to get the last date of that month
+
+        :return: date object
+            Last day of the month for the date instance supplied in the parameter
+        """
         if date.month == 12:
             return date.replace(day=31)
         return date.replace(month=date.month + 1, day=1) - timedelta(days=1)
 
 
-
-    def get_MN_List(self):
+    def get_MN_Dict(self, mn = True):
         """
         Retreives a MN idenifier from the https://cn.dataone.org/cn/v2/node/ endpoint
         Used to send the reports for different MNs
-        :return: Set of Member Node identifiers
+
+        :return: Dictionary of Member Node identifiers
+            Key - MN identifier
+            Value - Full name of the MN
+
         """
         node_url = "https://cn.dataone.org/cn/v2/node/"
         resp = requests.get(node_url, stream=True)
         root = ElementTree.fromstring(resp.content)
-        mn_list = set()
+        mn_dict = dict()
+
         for child in root:
-            node_type = child.attrib['type']
-            identifier = child.find('identifier')
-            if (node_type == "mn"):
-                mn_list.add(identifier.text)
-        return(mn_list)
+            if child.get('type') == "mn" and mn:
+                identifier = child.find('identifier').text
+                name = child.find('name').text
+                mn_dict[identifier] = name
+            else:
+                identifier = child.find('identifier').text
+                name = child.find('name').text
+                mn_dict[identifier] = name
+
+        return (mn_dict)
 
 
+    def get_es_unique_dois(self, start_date, end_date, nodeId = None):
+        """
 
+        Finds the dois from the eventlog and
+        returns a dictionary with the doi as the key and it's corresponding PID as a value
+
+        :param start_date: begin date for search
+        :param end_date: end date for search
+        :param nodeId: Node ID for the query term
+
+        :return: dictionary object
+
+        """
+
+        seriesIdWildCard = {
+            "seriesId": {
+                "value": "*doi*"
+            }
+        }
+
+        PIDWildCard = {
+            "pid.key": {
+                "value": "*doi*"
+            }
+        }
+
+        doi_dict = {}
+
+        search_body = [
+            {
+                "term": {"event.key": "read"}
+            },
+            {
+                "exists": {
+                    "field": "sessionId"
+                }
+            },
+            {
+                "terms": {
+                    "formatType": [
+                        "DATA",
+                        "METADATA"
+                    ]
+                }
+            },
+            {
+                "wildcard": seriesIdWildCard
+            }
+        ]
+
+        if nodeId:
+            nodeQuery = {
+                "term": {
+                    "nodeId" : nodeId
+                }
+            }
+            search_body.append(nodeQuery)
+
+        fields = ["pid", "seriesId"]
+
+        results, total1 = self.es.getSearches (q=search_body, index='eventlog-1', limit=1000000, fields=fields,
+                                                             date_start=datetime.strptime(start_date,'%m/%d/%Y'),
+                                                             date_end=datetime.strptime(end_date,'%m/%d/%Y'))
+
+        for result in results:
+            if result["seriesId"] not in doi_dict:
+                doi_dict[result["seriesId"]] = []
+                doi_dict[result["seriesId"]].append(result["pid"])
+
+        search_body[3]["wildcard"] = PIDWildCard
+
+        results, total2 = self.es.getSearches(q=search_body, index='eventlog-1', limit=1000000, fields=fields,
+                                                             date_start=datetime.strptime(start_date,'%m/%d/%Y'),
+                                                             date_end=datetime.strptime(end_date,'%m/%d/%Y'))
+
+        for result in results:
+            if result["pid"] not in doi_dict:
+                doi_dict[result["pid"]] = []
+                doi_dict[result["pid"]].append(result["pid"])
+
+        # query identifiers index only if there is anything to query!
+        if len(doi_dict) > 0:
+            return self.get_doi_dict_dataset_identifier_family(doi_dict)
+
+        return {}
+
+
+    def get_doi_dict_dataset_identifier_family(self, doi_dict):
+        """
+        Gets the dataset_identifier_family from the identifiers index for every key in the doi_dict
+
+        :param: doi_dict
+            A dictionary of the DOIs with the doi as the key and the resolved_pids a.k.a
+            the dataset_identifier_family as the value
+
+        :return: dictionary object
+        """
+
+
+        def _get_dataset_identifier_family(pid):
+            """
+
+            Retrieves the dataset_identifier_family
+
+            :param pid: The PID of interest
+
+            :return: a dictionary object
+
+            """
+
+            result = {}
+            result[pid] = []
+            result[pid].append(pid)
+
+            query_body = {
+                "bool": {
+                    "should": [
+                        {
+                            "term": {
+                                "PID.keyword": pid
+                            }
+                        }
+                    ]
+                }
+            }
+
+            data = self.es.getDatasetIdentifierFamily(search_query=query_body, max_limit=1)
+
+            # Parse only if there are existing records found in the `identifiers index`
+            try:
+                if data[1] > 0:
+                    result[pid].extend(data[0][0]["datasetIdentifierFamily"])
+            except:
+                pass
+
+            return result
+
+
+        async def work_get_identifier_family(doi_dict):
+            """
+
+            Creates async task to query ES, executes those tasks and returns results to
+            the parent function
+
+            :param doi_dict:
+
+            :return:
+
+            """
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as executor:
+                loop = asyncio.get_event_loop()
+                tasks = []
+
+                # for every pid in the dict
+                # cerate a new task and add it to the task list
+                for an_id in doi_dict:
+                    tasks.append(loop.run_in_executor(executor, _get_dataset_identifier_family, an_id))
+
+                # wait for the response to complete the tasks
+                for response in await asyncio.gather(*tasks):
+                    for response_key,response_val in response.items():
+                        results[response_key] = response_val
+
+            return
+
+        results = {}
+
+        # In a multithreading environment such as under gunicorn, the new thread created by
+        # gevent may not provide an event loop. Create a new one if necessary.
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError as e:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        future = asyncio.ensure_future(work_get_identifier_family(doi_dict))
+
+        # wait for the work to complete
+        loop.run_until_complete(future)
+
+        return results
+
+
+    def get_jobs_done(self, node):
+        jobs_done = {}
+
+        session = requests.Session()
+        retry = Retry(connect=3, backoff_factor=0.5)
+        adapter = HTTPAdapter(max_retries=retry)
+        session.mount('https://', adapter)
+
+        resp = session.get(self._config["report_url"] + "?created-by=" + node)
+
+        data = json.loads(resp.content.decode('utf-8'))
+
+        try:
+            if data["meta"]["total"] > 0:
+                for i in data["reports"]:
+                    jobs_done[i["report-header"]["reporting-period"]["begin-date"]] \
+                        = i["id"]
+        except:
+            return None
+
+        return jobs_done
 
 
 if __name__ == "__main__":
   md = MetricsReporter()
   # md.get_report_header("01/20/2018", "02/20/2018")
   # md.get_report_datasets("05/01/2018", "05/31/2018")
-  # md.resolve_MN("urn:node:KNB")
   # md.query_solr("df35b.302.1")
   # md.report_handler("05/01/2018", "05/30/2018")
-  # md.get_unique_pids("05/01/2018", "05/31/2018")
+  # md.get_unique_pids("05/01/2018", "05/31/2018", "urn:node:KNB")
   md.scheduler()
-  # md.resolvePIDs(["doi:10.18739/A2X65H"])

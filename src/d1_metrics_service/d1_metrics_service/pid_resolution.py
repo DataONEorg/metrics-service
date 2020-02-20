@@ -11,6 +11,7 @@ import requests
 import json
 import asyncio
 from aiohttp import ClientSession
+from d1_metrics.solrclient import SolrClient
 import concurrent.futures
 
 
@@ -411,6 +412,90 @@ def getResolvePIDs(PIDs, solr_url=None, use_mm_params=True):
   return results
 
 
+#####################################
+# Using the SOLR client to get the portals colletion query
+#
+#####################################
+
+
+def getPortalCollectionQueryFromSolr(url = None, portalLabel = None, pid = None, seriesId = None):
+    """
+      Returns the collection query for the portal
+      :param: url
+      :param: portalLabel
+      :param: pid
+      :param: seriesId
+
+      :returns: 
+        CollectionQuery string retrieved from SOLR
+    """
+    if url is None:
+      url = "https://cn.dataone.org/cn/v2/query"
+
+    # Create a solr client object
+    solrClientObject = SolrClient(url, "solr")
+    solrQuery = "*:*"
+
+    # supports retrieval of collection query via portal label, seriesId and PID
+    if (portalLabel is not None) or (seriesId is not None): 
+      if portalLabel:
+        solrQuery = "(-obsoletedBy:* AND (label:" + portalLabel + "))"
+      if seriesId:
+        solrQuery = "(-obsoletedBy:* AND (seriesId:" + seriesId + "))"
+    if pid:
+      solrQuery = "((id:" + pid + "))"
+
+    data = solrClientObject.getFieldValues('collectionQuery', q=solrQuery)
+    return data["collectionQuery"][0]
+
+
+def resolveCollectionQueryFromSolr(url = None, collectionQuery = "*:*"):
+  """
+    Uses d1_metrics SolrClient to resolve a collection Query.
+    :param: url
+    :param: collection query
+
+    :returns: 
+      resolved_collection_identifier: array object of the resolved collection identifiers
+  """
+  _L, t_0 = _getLogger()
+  # Point to the CN SOLR endpoint by default
+  if url is None:
+    url = "https://cn.dataone.org/cn/v2/query"
+
+  # unescape the escaped characters
+  collectionQuery = string_escape(collectionQuery)
+
+  # Create a solr client object
+  solrClientObject = SolrClient(url, "solr")
+  resolved_collection_identifier = []
+
+  try:
+    _L.debug("Fetching collections PIDs")
+    data = solrClientObject.getFieldValues('id', q=collectionQuery)
+
+    for hit in data['id'][::2]:
+      resolved_collection_identifier.append(hit)
+  except:
+    _L.error("Error in fetching collection PIDs")
+
+  return resolved_collection_identifier
+
+
+def string_escape(s, encoding='utf-8'):
+  """
+    Un-escaping the escaped strings
+
+      :param: s String to be unescaped
+      :param: 
+
+      :returns: Unescaped String
+  """
+  return (s.encode('latin1')         # To bytes, required by 'unicode-escape'
+            .decode('unicode-escape') # Perform the actual octal-escaping decode
+            .encode('latin1')         # 1:1 mapping back to bytes
+            .decode(encoding))        # Decode original encoding
+
 
 if __name__ == "__main__":
   from pprint import pprint
@@ -452,7 +537,8 @@ if __name__ == "__main__":
   #change verbosity of the urllib3.connectionpool logging
   #logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
   logging.basicConfig(level=logging.DEBUG, format='%(threadName)10s %(name)18s: %(message)s')
-  eg_pidsAndSid()
-  eg_getObsolescenceChain()
-  print("==eg: getResolvePids==")
-  eg_getResolvePids()
+  # eg_pidsAndSid()
+  # eg_getObsolescenceChain()
+  # print("==eg: getResolvePids==")
+  # eg_getResolvePids()
+  # getPortalCollectionQuery(url="https://dev.nceas.ucsb.edu/knb/d1/mn/v2/query/solr/?", portalLabel="portal-test")

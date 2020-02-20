@@ -14,7 +14,7 @@ setup(
   # Versions should comply with PEP440.  For a discussion on single-sourcing
   # the version across setup.py and the project code, see
   # https://packaging.python.org/en/latest/single_source_version.html
-  version='0.0.2',
+  version='0.2.0',
 
   description='Metrics service',
   long_description=long_description,
@@ -69,16 +69,16 @@ setup(
   # https://packaging.python.org/en/latest/requirements.html
   install_requires=[
     'pytz>=2018.5',
-    'elasticsearch>=6.3.0',
+    'elasticsearch==6.3.0',
     'psycopg2-binary>=2.7.5',
     'falcon>=1.4.1',
     'd1-metrics>=0.0.1',
     'd1-metrics-service>=0.0.1',
     'dateparser>=0.7.0',
     'requests>=2.19.1',
-    'psycopg2>=2.7.5',
+    'psycopg2-binary>=2.7.5',
     'schedule>=0.5.0',
-    'aiohttp>=2.3',
+    'aiohttp==2.3',
   ],
 
   # List additional groups of dependencies here (e.g. development

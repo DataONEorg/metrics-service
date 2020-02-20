@@ -1,0 +1,59 @@
+# Steps taken to install ELK stack on globus-dev
+# after https://www.elastic.co/guide/en/elastic-stack/current/installing-elastic-stack.html
+
+# Elasticsearch Installation
+
+wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
+echo "deb https://artifacts.elastic.co/packages/6.x/apt stable main" | sudo tee -a /etc/apt/sources.list.d/elastic-6.x.list
+sudo apt-get update && sudo apt-get install elasticsearch
+sudo /bin/systemctl daemon-reload
+sudo /bin/systemctl enable elasticsearch.service
+sudo service elasticsearch restart
+
+# I kept the firewall rule pretty tight here:
+sudo ufw allow from 128.111.54.73 to any port 9200
+
+# Verify ES is running and talking on port 9200:
+curl -X GET "localhost:9200/"
+
+# By default the Elasticsearch service doesn’t log information in the systemd
+# journal. To enable journalctl logging, the --quiet option must be removed
+# from the ExecStart command line in the elasticsearch.service file:
+# /etc/systemd/system/multi-user.target.wants/elasticsearch.service
+
+
+
+# Kibana Installation
+
+sudo apt-get install kibana
+sudo /bin/systemctl daemon-reload
+sudo /bin/systemctl enable kibana.service
+sudo service kibana restart
+
+
+
+# Logstash Installation
+
+sudo apt-get install logstash
+sudo /bin/systemctl daemon-reload
+sudo /bin/systemctl enable logstash.service
+sudo service logstash restart
+
+
+
+# Logstash Plugin Installation
+sudo /usr/share/logstash/bin/logstash-plugin install logstash-filter-json_encode
+
+# Updated fingerprint plugin; unneeded when fingerprint 3.2.1 is standard
+sudo /usr/share/logstash/bin/logstash-plugin update logstash-filter-fingerprint
+
+# Pip
+sudo apt-get install python-pip
+sudo pip install luqum
+sudo pip install elasticsearch
+
+
+
+# I installed these, but neither turned out to be necessary
+#sudo /usr/share/logstash/bin/logstash-plugin install logstash-filter-prune
+#sudo /usr/share/logstash/bin/logstash-plugin install logstash-filter-cipher
