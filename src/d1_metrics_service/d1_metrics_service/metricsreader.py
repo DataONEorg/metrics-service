@@ -1347,8 +1347,6 @@ class MetricsReader:
         # Getting portal PIDs from Collection Query
         portal_pids = pid_resolution.resolveCollectionQueryFromSolr(url = None, collectionQuery = collectionQuery)
         
-        if status_code != 200:
-            resultDetails["Error"] = "Can not resolve the collection query"
         resultDetails["portal_pids_size"] = len(portal_pids)
 
         t_portal_dataset_identifier_family = time.time()
