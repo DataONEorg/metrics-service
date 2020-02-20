@@ -11,6 +11,7 @@ import requests
 import json
 import asyncio
 from aiohttp import ClientSession
+from d1_metrics.solrclient import SolrClient
 import concurrent.futures
 
 
@@ -411,7 +412,13 @@ def getResolvePIDs(PIDs, solr_url=None, use_mm_params=True):
   return results
 
 
-def getPortalCollectionQuery(url, portalLabel = None, pid = None, seriesId = None):
+#####################################
+# Using the SOLR client to get the portals colletion query
+#
+#####################################
+
+
+def getPortalCollectionQueryFromSolr(url = None, portalLabel = None, pid = None, seriesId = None):
     """
       Returns the collection query for the portal
       :param: url
@@ -420,67 +427,59 @@ def getPortalCollectionQuery(url, portalLabel = None, pid = None, seriesId = Non
       :param: seriesId
 
       :returns: 
-        JSON object of the collectionQuery response retrieved from SOLR for a given portal label
+        CollectionQuery string retrieved from SOLR
     """
     if url is None:
-      url = "https://cn.dataone.org/cn/v2/query/solr/?"
-    session = requests.Session()
-    params = {'wt':(None,'json'),
-              'fl':(None,'collectionQuery'),
-              'rows':(None,10)
-              }
+      url = "https://cn.dataone.org/cn/v2/query"
+
+    # Create a solr client object
+    solrClientObject = SolrClient(url, "solr")
+    solrQuery = "*:*"
 
     # supports retrieval of collection query via portal label, seriesId and PID
     if (portalLabel is not None) or (seriesId is not None): 
       if portalLabel:
-        params['q'] = (None,"(-obsoletedBy:* AND (label:" + portalLabel + "))")
+        solrQuery = "(-obsoletedBy:* AND (label:" + portalLabel + "))"
       if seriesId:
-        params['q'] = (None,"(-obsoletedBy:* AND (seriesId:" + seriesId + "))")
+        solrQuery = "(-obsoletedBy:* AND (seriesId:" + seriesId + "))"
     if pid:
-      params['q'] = (None,"((id:" + pid + "))")
-    response = session.post(url, files=params)
-    
-    if response.status_code == requests.codes.ok:
-      resp_json = response.json()
+      solrQuery = "((id:" + pid + "))"
 
-    return resp_json
+    data = solrClientObject.getFieldValues('collectionQuery', q=solrQuery)
+    return data["collectionQuery"][0]
 
 
-def resolveCollectionQuery(url = None, collectionQuery = "*:*"):
+def resolveCollectionQueryFromSolr(url = None, collectionQuery = "*:*"):
   """
-    Queries SOLR to resolve the previously retieved collection Query.
+    Uses d1_metrics SolrClient to resolve a collection Query.
     :param: url
     :param: collection query
 
     :returns: 
-      status_code: response code for the SOLR request
       resolved_collection_identifier: array object of the resolved collection identifiers
   """
+  _L, t_0 = _getLogger()
   # Point to the CN SOLR endpoint by default
   if url is None:
-    url = "https://cn.dataone.org/cn/v2/query/solr/?"
-  
-  session = requests.Session()
-  params = {'wt':(None,'json'),
-            'fl':(None,'id'),
-            'rows': (None, 10000)
-          }
-  resolved_collection_identifier = []
+    url = "https://cn.dataone.org/cn/v2/query"
 
   # unescape the escaped characters
   collectionQuery = string_escape(collectionQuery)
 
-  params["q"] = (None, collectionQuery)
+  # Create a solr client object
+  solrClientObject = SolrClient(url, "solr")
+  resolved_collection_identifier = []
 
-  # performing a HTTP POST request to SOLR
-  response = session.post(url, files=params)
-  if response.status_code == requests.codes.ok:
-    resp_json = response.json()
-    
-    for doc in resp_json["response"]["docs"]:
-      resolved_collection_identifier.append(doc["id"])
+  try:
+    _L.debug("Fetching collections PIDs")
+    data = solrClientObject.getFieldValues('id', q=collectionQuery)
 
-  return response.status_code, resolved_collection_identifier
+    for hit in data['id'][::2]:
+      resolved_collection_identifier.append(hit)
+  except:
+    _L.error("Error in fetching collection PIDs")
+
+  return resolved_collection_identifier
 
 
 def string_escape(s, encoding='utf-8'):

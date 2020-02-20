@@ -1336,8 +1336,7 @@ class MetricsReader:
         t_start = time.time()
 
         # Retrieving collection Query
-        portalCollectionQueryResponse = pid_resolution.getPortalCollectionQuery(url = "https://dev.nceas.ucsb.edu/knb/d1/mn/v2/query/solr/?", portalLabel = portalLabel)
-        collectionQuery = portalCollectionQueryResponse["response"]["docs"][0]["collectionQuery"]
+        collectionQuery = pid_resolution.getPortalCollectionQueryFromSolr(url = None, portalLabel = portalLabel)
         collectionQuery = collectionQuery.replace('-obsoletedBy:* AND ', '')
 
         resultDetails["collection_query"] = collectionQuery
@@ -1346,11 +1345,10 @@ class MetricsReader:
         t_portal_pids = time.time()
         
         # Getting portal PIDs from Collection Query
-        status_code, portal_pids = pid_resolution.resolveCollectionQuery(url = None, collectionQuery = collectionQuery)
+        portal_pids = pid_resolution.resolveCollectionQueryFromSolr(url = None, collectionQuery = collectionQuery)
         
         if status_code != 200:
             resultDetails["Error"] = "Can not resolve the collection query"
-        resultDetails["Status Code"] = status_code
         resultDetails["portal_pids_size"] = len(portal_pids)
 
         t_portal_dataset_identifier_family = time.time()
