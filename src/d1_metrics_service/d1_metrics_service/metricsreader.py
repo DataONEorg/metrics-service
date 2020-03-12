@@ -714,11 +714,26 @@ class MetricsReader:
             }
         }
 
-        # we have events in ES from July 2012
-        # TODO : Set this to the initial repository onboarding date
-        # i.e. the first dataset submission date for that repository
-        start_date = "07/01/2012"
+        start_date = "01/01/2000"
         end_date = datetime.today().strftime('%m/%d/%Y')
+
+        # update the date range
+        if (len(self.response["metricsRequest"]["filterBy"]) > 1) :
+            if (self.response["metricsRequest"]["filterBy"][1]["filterType"] == "month" and self.response["metricsRequest"]["filterBy"][1]["interpretAs"] == "range"):
+                start_date = self.response["metricsRequest"]["filterBy"][1]["values"][0]
+                end_date = self.response["metricsRequest"]["filterBy"][1]["values"][1]
+
+        # if the aggregation is requested by country, add country object to groupBy
+        if ("country" in self.response["metricsRequest"]["groupBy"]) :
+            countryObject = {
+                "country": {
+                    "terms": {
+                        "field": "geoip.country_code2.keyword",
+                        "missing_bucket": "true"
+                    }
+                }
+            }
+            aggregation_body["pid_list"]["composite"]["sources"].append(countryObject)
 
         # Query the ES with the designed Search and Aggregation body
         # uses the start_date and the end_date for the time range of data retrieval
@@ -730,75 +745,11 @@ class MetricsReader:
 
         t_delta = time.time() - t_start
         self.logger.debug('getMetricsPerRepository:t3=%.4f', t_delta)
-        return (self.formatMetricsPerRepository(data, nodeId, start_date, end_date))
 
+        node_list = []
+        node_list.append(nodeId)
 
-    def formatMetricsPerRepository(self, data, nodeId, start_date, end_date):
-        """
-        Formats the ES response to the Metrics Service response
-        Documented at https://app.swaggerhub.com/apis/nenuji/data-metrics/1.0.0.3
-        :param: data - Dictionary object retreieved as a response from ES
-        :param: nodeId - Identifier fo the repository
-        :param: start_date
-        :param: end_date
-        :return:
-            results - Dictionary object for Metrics Response
-            resultDetails - Dictionary object for additional information about the  Metrics Response
-        """
-        results = {
-            "months": [],
-            "downloads": [],
-            "views": [],
-            "citations": [],
-        }
-
-        # Getting the months between the two given dates:
-        start = datetime.strptime(start_date, "%m/%d/%Y")
-        end = datetime.strptime(end_date, "%m/%d/%Y")
-
-        # Getting a list of all the months possible for the repo
-        # And initializing the corresponding metrics array
-        results["months"] = list(OrderedDict(((start + timedelta(_)).strftime('%Y-%m'), None) for _ in range((end - start).days)).keys())
-        results["downloads"] = [0]*len(results["months"])
-        results["views"] = [0]*len(results["months"])
-        results["citations"] = [0]*len(results["months"])
-
-        #Gathering Citations
-        resultDetails = {}
-        resultDetails["citations"] = []
-        citationDict = {}
-        citation_pids = self.getRepositoryCitationPIDs(nodeId)
-        totalCitations, resultDetails["citations"] = self.gatherCitations(citation_pids)
-
-        for citationObject in resultDetails["citations"]:
-            if(citationObject["link_publication_date"][:7] in citationDict):
-                citationDict[citationObject["link_publication_date"][:7]] = citationDict[citationObject["link_publication_date"][:7]] + 1
-            else:
-                citationDict[citationObject["link_publication_date"][:7]] = 1
-
-        # Formatting the response from ES
-        for i in data["aggregations"]["pid_list"]["buckets"]:
-            months = datetime.utcfromtimestamp((i["key"]["month"] // 1000)).strftime(('%Y-%m'))
-            month_index = results["months"].index(months)
-            if i["key"]["format"] == "DATA":
-                results["downloads"][month_index] += i["doc_count"]
-            elif i["key"]["format"] == "METADATA":
-                results["views"][month_index] += i["doc_count"]
-            else:
-                pass
-
-        for months in citationDict:
-            if months in results["months"]:
-                month_index = results["months"].index(months)
-                results["citations"][month_index] = citationDict[months]
-            else:
-                results["months"].append(months)
-                results["views"].append(0)
-                results["downloads"].append(0)
-                results["citations"][month_index] = citationDict[months]
-
-
-        return results, resultDetails
+        return (self.formatElasticSearchResults(data, node_list, start_date, end_date, objectType="repository"))
 
 
     def getRepositoryCitationPIDs(self, nodeId):
@@ -1322,16 +1273,6 @@ class MetricsReader:
         metrics_elastic_search = MetricsElasticSearch()
         metrics_elastic_search.connect()
 
-        if (len(self.response["metricsRequest"]["filterBy"]) > 1):
-            if (self.response["metricsRequest"]["filterBy"][1]["filterType"] == "month" and
-                        self.response["metricsRequest"]["filterBy"][1]["interpretAs"] == "range"):
-                start_date = self.response["metricsRequest"]["filterBy"][1]["values"][0]
-            else:
-                start_date = "01/01/2012"
-        else:
-            start_date = "01/01/2012"
-        end_date = datetime.today().strftime('%m/%d/%Y')
-
         results, resultDetails = {}, {}
         t_start = time.time()
 
@@ -1402,6 +1343,27 @@ class MetricsReader:
             }
         }
 
+        start_date = "01/01/2000"
+        end_date = datetime.today().strftime('%m/%d/%Y')
+
+        # update the date range
+        if (len(self.response["metricsRequest"]["filterBy"]) > 1) :
+            if (self.response["metricsRequest"]["filterBy"][1]["filterType"] == "month" and self.response["metricsRequest"]["filterBy"][1]["interpretAs"] == "range"):
+                start_date = self.response["metricsRequest"]["filterBy"][1]["values"][0]
+                end_date = self.response["metricsRequest"]["filterBy"][1]["values"][1]
+
+        # if the aggregation is requested by country, add country object to groupBy
+        if ("country" in self.response["metricsRequest"]["groupBy"]) :
+            countryObject = {
+                "country": {
+                    "terms": {
+                        "field": "geoip.country_code2.keyword",
+                        "missing_bucket": "true"
+                    }
+                }
+            }
+            aggregation_body["pid_list"]["composite"]["sources"].append(countryObject)
+
         t_delta = time.time() - t_start
         self.logger.debug('getMetricsPerPortal:t2=%.4f', t_delta)
 
@@ -1413,7 +1375,9 @@ class MetricsReader:
                                                                                                   '%m/%d/%Y'),
                                                                      end_date=datetime.strptime(end_date, '%m/%d/%Y'))
 
-        return (self.formatDataPerPortal(data, pdif, start_date, end_date, resultDetails))
+        requestMetadata = {}
+        requestMetadata["collectionDetails"] = resultDetails
+        return (self.formatElasticSearchResults(data, pdif, start_date, end_date,"portal", requestMetadata))
 
 
     def getPortalDatasetIdentifierFamily(self, portal_pids):
@@ -1456,105 +1420,13 @@ class MetricsReader:
         return(datasetIdentifierFamily, results[1])
 
 
-    def formatDataPerPortal(self, data, portal_pids, start_date, end_date, collectionDetails):
-        """
-        Formats the results retrieved from the Elastic Search and returns it as a HTTP response
-        :param data: the data retrieve from ES
-        :param citation_pids: PIDS to check the corresponding citations for
-        :param start_date: begin date range for the results
-        :param end_date: end date range for the results
-        :param collectionDetails: dictionary object with collection metadata
-        :return:
-            A tuple of formatted JSON response objects containing the metrics corresponding metadata.
-        """
-        results = {
-            "months": [],
-            "downloads": [],
-            "views": [],
-            "citations": [],
-        }
-
-        resultDetails = {}
-        resultDetails["citations"] = []
-        resultDetails["collectionQuery"] = collectionDetails
-
-        if len(portal_pids) == 0:
-            return results, resultDetails
-
-        # Getting the months between the two given dates:
-        start = datetime.strptime(start_date, "%m/%d/%Y")
-        end = datetime.strptime(end_date, "%m/%d/%Y")
-
-        # Getting a list of all the months possible for the user
-        # And initializing the corresponding metrics array
-        results["months"] = list(
-            OrderedDict(((start + timedelta(_)).strftime('%Y-%m'), None) for _ in range((end - start).days)).keys())
-        results["downloads"] = [0] * len(results["months"])
-        results["views"] = [0] * len(results["months"])
-        results["citations"] = [0] * len(results["months"])
-
-        # Gathering Citations
-        citationDict = {}
-        totalCitations, citationsCollectionObject = self.gatherCitations(portal_pids)
-
-        for citationObject in citationsCollectionObject:
-            if (citationObject["link_publication_date"][:7] in citationDict):
-                citationDict[citationObject["link_publication_date"][:7]] = citationDict[citationObject["link_publication_date"][:7]] + 1
-            else:
-                citationDict[citationObject["link_publication_date"][:7]] = 1
-
-        # Formatting the response from ES
-        for i in data["aggregations"]["pid_list"]["buckets"]:
-            months = datetime.utcfromtimestamp((i["key"]["month"] // 1000)).strftime(('%Y-%m'))
-            month_index = results["months"].index(months)
-            if i["key"]["format"] == "DATA":
-                results["downloads"][month_index] += i["doc_count"]
-            elif i["key"]["format"] == "METADATA":
-                results["views"][month_index] += i["doc_count"]
-            else:
-                pass
-
-        for months in citationDict:
-            if months in results["months"]:
-                month_index = results["months"].index(months)
-                results["citations"][month_index] = citationDict[months]
-            # Fixing citations that are manually added by DataONE team
-            elif (months is None) or (months == "NULL"):
-                results["citations"][-1] = citationDict[months]
-            else:
-                results["months"].append(months)
-                results["views"].append(0)
-                results["downloads"].append(0)
-                results["citations"][month_index] = citationDict[months]
-
-        # Returning citations in resultDetails object
-        targetSourceDict = {}
-        for i in citationsCollectionObject:
-            if i["source_id"] not in targetSourceDict:
-                targetSourceDict[i["source_id"]] = {}
-                targetSourceDict[i["source_id"]]["target_id"] = []
-                targetSourceDict[i["source_id"]]["target_id"].append(i["target_id"])
-            else:
-                targetSourceDict[i["source_id"]]["target_id"].append(i["target_id"])
-            for k,v in i.items():
-                if k != "target_id":
-                    targetSourceDict[i["source_id"]][k] = v
-            targetSourceDict[i["source_id"]]["citationMetadata"] = {}
-
-        for i in targetSourceDict:
-            targetSourceDict[i]["citationMetadata"] = self.getCitationSourceMetadata(targetSourceDict[i]["target_id"])
-        resultDetails["citations"] = targetSourceDict
-
-        return results, resultDetails
-
-
     def getCitationSourceMetadata(self, PIDs):
         """
         Queries SOLR to get CITED Target Dataset metadata
         """
 
         for i in range(len(PIDs)):
-            if PIDs[i].startswith("10.3",0,3):
+            if PIDs[i].startswith("10.",0,3):
                 PIDs[i] = "doi:" + PIDs[i]
                 
 
@@ -1584,6 +1456,182 @@ class MetricsReader:
         
         return solr_query_url
 
+
+    def formatElasticSearchResults(self, data, PIDList, start_date, end_date, objectType = None, requestMetadata = {}):
+            """
+            Formats the ES response to the Metrics Service response
+            Documented at https://app.swaggerhub.com/apis/nenuji/data-metrics/1.0.0.3
+            :param: data - Dictionary object retreieved as a response from ES
+            :param: PIDList - List of identifiers associated with this request
+            :param: objectType - Type of filter object (node, portal, user, group)
+            :param: requestMetadata - additional metadata assoicated with the request.
+            :param: start_date
+            :param: end_date
+            :return:
+                results - Dictionary object for Metrics Response
+                resultDetails - Dictionary object for additional information about the  Metrics Response
+            """
+            results = {
+                "months": [],
+                "downloads": [],
+                "views": [],
+                "citations": [],
+                "country": [],
+            }
+
+            # Getting the months between the two given dates:
+            start_dt = datetime.strptime(start_date, "%m/%d/%Y")
+            end_dt = datetime.strptime(end_date, "%m/%d/%Y")
+
+            #Gathering Citations
+            resultDetails = {}
+            resultDetails["citations"] = []
+            citationDict = {}
+            resultDetailsCitationObject = []
+
+            if objectType == "repository":
+                citation_pids = self.getRepositoryCitationPIDs(PIDList[0])
+
+            if objectType == "portal":
+                resultDetails["collectionDetails"] = requestMetadata["collectionDetails"]
+                citation_pids = PIDList
+
+            totalCitationObjects, citationDetails = self.gatherCitations(citation_pids)
+
+            # append totals to resultDetails object
+            totalCitations, totalDownloads, totalViews = 0, 0, 0
+            for citationObject in citationDetails:
+                citation_link_pub_date = citationObject["link_publication_date"][:7]
+
+                # If citations publish date is not available, assign most recent month to it.
+                if (citation_link_pub_date == None) or (citation_link_pub_date == "NULL"):
+                    citation_link_pub_date = datetime.strftime(end_dt, "%Y-%m")
+                
+                # Check if the citations falls within the given time range.
+                citation_pub_date = datetime.strptime(citation_link_pub_date, "%Y-%m")
+
+                if (citation_pub_date > start_dt) and (citation_pub_date < end_dt):
+                    resultDetailsCitationObject.append(citationObject)
+                    totalCitations+=1
+                    if(citation_link_pub_date in citationDict):
+                        citationDict[citation_link_pub_date] = citationDict[citation_link_pub_date] + 1
+                    else:
+                        citationDict[citation_link_pub_date] = 1
+
+            # Check if the request is for grouping by country
+            if ("country" in self.response["metricsRequest"]["groupBy"]) :
+                # resultDetails["data"] = data["aggregations"]
+                records = {}
+
+                # Combine metrics into a single dictionary
+                for i in data["aggregations"]["pid_list"]["buckets"]:
+                    month = datetime.utcfromtimestamp((i["key"]["month"]//1000)).strftime(('%Y-%m'))
+                    
+                    # handling cases where country is null
+                    if (i["key"]["country"] is None) or (i["key"]["country"] == "null"):
+                        i["key"]["country"] = "US"
+                    
+                    if month not in records:
+                        records[month] = {}
+                    if i["key"]["country"] not in records[month]:
+                        records[month][i["key"]["country"]] = {}
+                    if (i["key"]["format"] == "DATA"):
+                        totalDownloads += i["doc_count"]
+                        records[month][i["key"]["country"]]["downloads"] = i["doc_count"]
+                    if (i["key"]["format"] == "METADATA"):
+                        totalViews += i["doc_count"]
+                        records[month][i["key"]["country"]]["views"] = i["doc_count"]
+                    pass
+
+                # Parse the dictionary to form the expected output in the form of lists
+                for months in records:
+                    for country in records[months]:
+                        results["months"].append(months)
+                        results["country"].append(country)
+                        if("downloads" in self.response["metricsRequest"]["metrics"]):
+                            if "downloads" in records[months][country]:
+                                results["downloads"].append(records[months][country]["downloads"])
+                            else:
+                                results["downloads"].append(0)
+
+                        # Views for the given time period.
+                        if ("views" in self.response["metricsRequest"]["metrics"]):
+                            if "views" in records[months][country]:
+                                results["views"].append(records[months][country]["views"])
+                            else:
+                                results["views"].append(0)
+
+                        if ("citations" in self.response["metricsRequest"]["metrics"]):
+                                if(months in citationDict):
+                                    results["citations"].append(citationDict[months])
+                                else:
+                                    results["citations"].append(0)
+
+                for months in citationDict:
+                    if months not in results["months"]:
+                        results["months"].append(months)
+                        results["views"].append(0)
+                        results["downloads"].append(0)
+                        results["country"].append('US')
+                        results["citations"].append(citationDict[months])
+
+            # Proceed with the month facet by default for groupBy
+            else:
+
+                # Getting a list of all the months possible for the repo
+                # And initializing the corresponding metrics array
+                results["months"] = list(OrderedDict(((start_dt + timedelta(_)).strftime('%Y-%m'), None) for _ in range((end_dt - start_dt).days)).keys())
+                results["downloads"] = [0]*len(results["months"])
+                results["views"] = [0]*len(results["months"])
+                results["citations"] = [0]*len(results["months"])
+
+                # Formatting the response from ES
+                for i in data["aggregations"]["pid_list"]["buckets"]:
+                    months = datetime.utcfromtimestamp((i["key"]["month"] // 1000)).strftime(('%Y-%m'))
+                    month_index = results["months"].index(months)
+                    if i["key"]["format"] == "DATA":
+                        totalDownloads += i["doc_count"]
+                        results["downloads"][month_index] += i["doc_count"]
+                    elif i["key"]["format"] == "METADATA":
+                        totalViews += i["doc_count"]
+                        results["views"][month_index] += i["doc_count"]
+                    else:
+                        pass
+
+                for months in citationDict:
+                    if months in results["months"]:
+                        month_index = results["months"].index(months)
+                        results["citations"][month_index] = citationDict[months]
+                    else:
+                        results["months"].append(months)
+                        results["views"].append(0)
+                        results["downloads"].append(0)
+                        results["citations"][month_index] = citationDict[months]
+   
+            # Returning citations and dataset links in resultDetails object
+            targetSourceDict = {}
+            for i in resultDetailsCitationObject:
+                if i["source_id"] not in targetSourceDict:
+                    targetSourceDict[i["source_id"]] = {}
+                    targetSourceDict[i["source_id"]]["target_id"] = []
+                    targetSourceDict[i["source_id"]]["target_id"].append(i["target_id"])
+                else:
+                    targetSourceDict[i["source_id"]]["target_id"].append(i["target_id"])
+                for k,v in i.items():
+                    if k != "target_id":
+                        targetSourceDict[i["source_id"]][k] = v
+                targetSourceDict[i["source_id"]]["citationMetadata"] = {}
+
+            for i in targetSourceDict:
+                targetSourceDict[i]["citationMetadata"] = self.getCitationSourceMetadata(targetSourceDict[i]["target_id"])
+            resultDetails["citations"] = targetSourceDict
+
+            # append totals to the resultDetails object
+            resultDetails["totalCitations"] = totalCitations
+            resultDetails["totalDownloads"] = totalDownloads
+            resultDetails["totalViews"] = totalViews
+
+            return results, resultDetails
 
 
 if __name__ == "__main__":
