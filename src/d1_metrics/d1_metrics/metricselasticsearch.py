@@ -980,7 +980,7 @@ class MetricsElasticSearch(object):
             },
             {
               "terms": {
-                "subject": self.get_list_of_nodes()
+                "subject.key": self.get_list_of_nodes()
               }
             }
           ],
