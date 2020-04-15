@@ -5,6 +5,7 @@ import logging
 import configparser
 from elasticsearch import Elasticsearch
 from elasticsearch import helpers
+from d1_metrics.metricsreporter import MetricsReporter
 import requests
 import json
 import datetime
@@ -18,8 +19,7 @@ CONFIG_ELASTIC_SECTION = "elasticsearch"
 DEFAULT_ELASTIC_CONFIG = {
   "host":"localhost",
   "port":9200,
-  "index":"eventlog-1",
-  "request_timeout":30,
+  "index":"eventlog-2"
   }
 
 class MetricsElasticSearch(object):
@@ -959,6 +959,7 @@ class MetricsElasticSearch(object):
 
     if index is None:
       index = self.indexname
+
     search_body = {
       "size": 0,
       "query": {
@@ -975,6 +976,11 @@ class MetricsElasticSearch(object):
                   "dataone_ip",
                   "robot_ip"
                 ]
+              }
+            },
+            {
+              "terms": {
+                "subject": self.get_list_of_nodes()
               }
             }
           ],
@@ -1046,9 +1052,20 @@ class MetricsElasticSearch(object):
     return self._getQueryResults(index, search_body, max_limit)
 
 
-# if __name__ == "__main__":
-#   md = MetricsElasticSearch()
-# #   # md.get_report_header("01/20/2018", "02/20/2018")
-#   md.connect()
-# #   data = md.get_report_aggregations()
-#   data = md.iterate_composite_aggregations()
+  def get_list_of_nodes(self):
+    """
+    Gets a list of nodes to exclude from the ES result
+    :return: Python set object
+    """
+    mr = MetricsReporter()
+    list_nodes = set()
+    for node in mr.get_MN_Dict().keys():
+      list_nodes.add(node)
+      list_nodes.add("CN=" + node + ",DC=dataone,DC=org")
+    return list_nodes
+
+
+
+if __name__ == "__main__":
+  md = MetricsElasticSearch()
+  md.get_list_of_nodes()
