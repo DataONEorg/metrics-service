@@ -658,11 +658,11 @@ class MetricsReader:
         metrics_elastic_search = MetricsElasticSearch()
         metrics_elastic_search.connect()
 
-        includeCitations, includeDownlaods, includeViews = False, False, False
+        includeCitations, includeDownloads, includeViews = False, False, False
         if "citations" in self.response["metricsRequest"]["metrics"]:
             includeCitations = True
         if "downloads" in self.response["metricsRequest"]["metrics"]:
-            includeDownlaods = True
+            includeDownloads = True
         if "views" in self.response["metricsRequest"]["metrics"]:
             includeViews = True
 
@@ -681,7 +681,7 @@ class MetricsReader:
                 end_date = self.response["metricsRequest"]["filterBy"][1]["values"][1]
 
         data = {}
-        if includeDownlaods or includeViews:
+        if includeDownloads or includeViews:
             # defining the ES search and aggregation body for Repository profile
             search_body = [
                 {
@@ -1289,6 +1289,26 @@ class MetricsReader:
         results, resultDetails = {}, {}
         t_start = time.time()
 
+        # Setting flags abse don the query params
+        includeCitations, includeDownloads, includeViews = False, False, False
+        if "citations" in self.response["metricsRequest"]["metrics"]:
+            includeCitations = True
+        if "downloads" in self.response["metricsRequest"]["metrics"]:
+            includeDownloads = True
+        if "views" in self.response["metricsRequest"]["metrics"]:
+            includeViews = True
+
+        # Defaulting date to beginnning and end timestamps
+        start_date = "01/01/2000"
+        end_date = datetime.today().strftime('%m/%d/%Y')
+
+        # update the date range if supplied in the query
+        if (len(self.response["metricsRequest"]["filterBy"]) > 1):
+            if (self.response["metricsRequest"]["filterBy"][1]["filterType"] == "month" and
+                        self.response["metricsRequest"]["filterBy"][1]["interpretAs"] == "range"):
+                start_date = self.response["metricsRequest"]["filterBy"][1]["values"][0]
+                end_date = self.response["metricsRequest"]["filterBy"][1]["values"][1]
+
         # Retrieving collection Query
         collectionQuery = pid_resolution.getPortalCollectionQueryFromSolr(url = None, portalLabel = portalLabel)
         collectionQuery = collectionQuery.replace('-obsoletedBy:* AND ', '')
@@ -1305,88 +1325,81 @@ class MetricsReader:
 
         t_portal_dataset_identifier_family = time.time()
         pdif, resultDetails["es_result_size"] = self.getPortalDatasetIdentifierFamily(portal_pids)
-        
-        # Search body for Portal Metrics
-        search_body = [
-            {
-                "term": {"event.key": "read"}
-            },
-            {
-                "terms": {
-                    "pid.key": pdif
-                }
-            },
-            {
-                "exists": {
-                    "field": "sessionId"
-                }
-            },
-            {
-                "terms": {
-                    "formatType": [
-                        "DATA",
-                        "METADATA"
-                    ]
-                }
-            }
-        ]
 
-        # aggregation body for Portal Metrics
-        aggregation_body = {
-            "pid_list": {
-                "composite": {
-                    "sources": [
-                        {
-                            "format": {
-                                "terms": {
-                                    "field": "formatType"
-                                }
-                            }
-                        },
-                        {
-                            "month": {
-                                "date_histogram": {
-                                    "field": "dateLogged",
-                                    "interval": "month"
-                                }
-                            }
-                        }
-                    ]
-                }
-            }
-        }
-
-        start_date = "01/01/2000"
-        end_date = datetime.today().strftime('%m/%d/%Y')
-
-        # update the date range
-        if (len(self.response["metricsRequest"]["filterBy"]) > 1) :
-            if (self.response["metricsRequest"]["filterBy"][1]["filterType"] == "month" and self.response["metricsRequest"]["filterBy"][1]["interpretAs"] == "range"):
-                start_date = self.response["metricsRequest"]["filterBy"][1]["values"][0]
-                end_date = self.response["metricsRequest"]["filterBy"][1]["values"][1]
-
-        # if the aggregation is requested by country, add country object to groupBy
-        if ("country" in self.response["metricsRequest"]["groupBy"]) :
-            countryObject = {
-                "country": {
+        data = {}
+        if includeDownloads or includeViews:
+            # Search body for Portal Metrics
+            search_body = [
+                {
+                    "term": {"event.key": "read"}
+                },
+                {
                     "terms": {
-                        "field": "geoip.country_code2.keyword",
-                        "missing_bucket": "true"
+                        "pid.key": pdif
+                    }
+                },
+                {
+                    "exists": {
+                        "field": "sessionId"
+                    }
+                },
+                {
+                    "terms": {
+                        "formatType": [
+                            "DATA",
+                            "METADATA"
+                        ]
+                    }
+                }
+            ]
+
+            # aggregation body for Portal Metrics
+            aggregation_body = {
+                "pid_list": {
+                    "composite": {
+                        "sources": [
+                            {
+                                "format": {
+                                    "terms": {
+                                        "field": "formatType"
+                                    }
+                                }
+                            },
+                            {
+                                "month": {
+                                    "date_histogram": {
+                                        "field": "dateLogged",
+                                        "interval": "month"
+                                    }
+                                }
+                            }
+                        ]
                     }
                 }
             }
-            aggregation_body["pid_list"]["composite"]["sources"].append(countryObject)
 
-        t_delta = time.time() - t_start
-        self.logger.debug('getMetricsPerPortal:t2=%.4f', t_delta)
+            # if the aggregation is requested by country, add country object to groupBy
+            if ("country" in self.response["metricsRequest"]["groupBy"]) :
+                countryObject = {
+                    "country": {
+                        "terms": {
+                            "field": "geoip.country_code2.keyword",
+                            "missing_bucket": "true"
+                        }
+                    }
+                }
+                aggregation_body["pid_list"]["composite"]["sources"].append(countryObject)
 
-        t_es_start = time.time()
+            t_delta = time.time() - t_start
+            self.logger.debug('getMetricsPerPortal:t2=%.4f', t_delta)
 
-        data = metrics_elastic_search.iterate_composite_aggregations(search_query=search_body,
-                                                                     aggregation_query=aggregation_body,
-                                                                     start_date=datetime.strptime(start_date,
-                                                                                                  '%m/%d/%Y'),
-                                                                     end_date=datetime.strptime(end_date, '%m/%d/%Y'))
+            t_es_start = time.time()
+
+            data = metrics_elastic_search.iterate_composite_aggregations(search_query=search_body,
+                                                                         aggregation_query=aggregation_body,
+                                                                         start_date=datetime.strptime(start_date,
+                                                                                                      '%m/%d/%Y'),
+                                                                         end_date=datetime.strptime(end_date, '%m/%d/%Y'))
 
         requestMetadata = {}
         requestMetadata["collectionDetails"] = resultDetails
