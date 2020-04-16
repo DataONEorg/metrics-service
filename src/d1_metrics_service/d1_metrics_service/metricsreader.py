@@ -658,90 +658,103 @@ class MetricsReader:
         metrics_elastic_search = MetricsElasticSearch()
         metrics_elastic_search.connect()
 
+        includeCitations, includeDownlaods, includeViews = False, False, False
+        if "citations" in self.response["metricsRequest"]["metrics"]:
+            includeCitations = True
+        if "downloads" in self.response["metricsRequest"]["metrics"]:
+            includeDownlaods = True
+        if "views" in self.response["metricsRequest"]["metrics"]:
+            includeViews = True
+
         t_delta = time.time() - t_start
         self.logger.debug('getMetricsPerRepository:t1=%.4f', t_delta)
 
-        # defining the ES search and aggregation body for Repository profile
-        search_body = [
-            {
-                "term": {"event.key": "read"}
-            },
-            {
-                "exists": {
-                    "field": "sessionId"
-                }
-            },
-            {
-                "terms": {
-                    "formatType": [
-                        "DATA",
-                        "METADATA"
-                    ]
-                }
-            }
-        ]
-
-        if nodeId != "urn:node:CN":
-            nodeTermQuery = {
-                "term": {
-                    "nodeId": nodeId
-                }
-            },
-            search_body.append(nodeTermQuery)
-
-        aggregation_body = {
-            "pid_list": {
-                "composite": {
-                    "size": 100,
-                    "sources": [
-                        {
-                            "format": {
-                                "terms": {
-                                    "field": "formatType"
-                                }
-                            }
-                        },
-                        {
-                            "month": {
-                                "date_histogram": {
-                                    "field": "dateLogged",
-                                    "interval": "month"
-                                }
-                            }
-                        }
-                    ]
-                }
-            }
-        }
-
+        # Defaulting date to beginnning and end timestamps
         start_date = "01/01/2000"
         end_date = datetime.today().strftime('%m/%d/%Y')
 
-        # update the date range
-        if (len(self.response["metricsRequest"]["filterBy"]) > 1) :
-            if (self.response["metricsRequest"]["filterBy"][1]["filterType"] == "month" and self.response["metricsRequest"]["filterBy"][1]["interpretAs"] == "range"):
+        # update the date range if supplied in the query
+        if (len(self.response["metricsRequest"]["filterBy"]) > 1):
+            if (self.response["metricsRequest"]["filterBy"][1]["filterType"] == "month" and
+                        self.response["metricsRequest"]["filterBy"][1]["interpretAs"] == "range"):
                 start_date = self.response["metricsRequest"]["filterBy"][1]["values"][0]
                 end_date = self.response["metricsRequest"]["filterBy"][1]["values"][1]
 
-        # if the aggregation is requested by country, add country object to groupBy
-        if ("country" in self.response["metricsRequest"]["groupBy"]) :
-            countryObject = {
-                "country": {
+        data = {}
+        if includeDownlaods or includeViews:
+            # defining the ES search and aggregation body for Repository profile
+            search_body = [
+                {
+                    "term": {"event.key": "read"}
+                },
+                {
+                    "exists": {
+                        "field": "sessionId"
+                    }
+                },
+                {
                     "terms": {
-                        "field": "geoip.country_code2.keyword",
-                        "missing_bucket": "true"
+                        "formatType": [
+                            "DATA",
+                            "METADATA"
+                        ]
+                    }
+                }
+            ]
+
+            if nodeId != "urn:node:CN":
+                nodeTermQuery = {
+                                    "term": {
+                                        "nodeId": nodeId
+                                    }
+                                },
+                search_body.append(nodeTermQuery)
+
+            aggregation_body = {
+                "pid_list": {
+                    "composite": {
+                        "size": 100,
+                        "sources": [
+                            {
+                                "format": {
+                                    "terms": {
+                                        "field": "formatType"
+                                    }
+                                }
+                            },
+                            {
+                                "month": {
+                                    "date_histogram": {
+                                        "field": "dateLogged",
+                                        "interval": "month"
+                                    }
+                                }
+                            }
+                        ]
                     }
                 }
             }
-            aggregation_body["pid_list"]["composite"]["sources"].append(countryObject)
 
-        # Query the ES with the designed Search and Aggregation body
-        # uses the start_date and the end_date for the time range of data retrieval
-        data = metrics_elastic_search.iterate_composite_aggregations(search_query=search_body,
-                                                                     aggregation_query=aggregation_body,
-                                                                     start_date=datetime.strptime(start_date,
-                                                                                                  '%m/%d/%Y'),
-                                                                     end_date=datetime.strptime(end_date, '%m/%d/%Y'))
+            # if the aggregation is requested by country, add country object to groupBy
+            if ("country" in self.response["metricsRequest"]["groupBy"]):
+                countryObject = {
+                    "country": {
+                        "terms": {
+                            "field": "geoip.country_code2.keyword",
+                            "missing_bucket": "true"
+                        }
+                    }
+                }
+                aggregation_body["pid_list"]["composite"]["sources"].append(countryObject)
+
+            # Query the ES with the designed Search and Aggregation body
+            # uses the start_date and the end_date for the time range of data retrieval
+            data = metrics_elastic_search.iterate_composite_aggregations(search_query=search_body,
+                                                                         aggregation_query=aggregation_body,
+                                                                         start_date=datetime.strptime(start_date,
+                                                                                                      '%m/%d/%Y'),
+                                                                         end_date=datetime.strptime(end_date,
+                                                                                                    '%m/%d/%Y'))
 
         t_delta = time.time() - t_start
         self.logger.debug('getMetricsPerRepository:t3=%.4f', t_delta)
