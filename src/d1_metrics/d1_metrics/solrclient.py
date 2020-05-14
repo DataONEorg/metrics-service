@@ -8,7 +8,7 @@ import datetime
 import json
 import re
 import time
-
+from ConfigParser import SafeConfigParser
 
 
 LOG_NAME = "logagg"
@@ -42,12 +42,25 @@ class SolrClient(object):
     self._select = select
     self.logger = logging.getLogger(APP_LOG)
     self.client = requests.Session()
+    self.cert = self._getSolrCert()
+
+
+  def _getSolrCert():
+    '''
+    Returns a solr certificate file for the queries
+
+    :return: file certificate  object to query solr
+    '''
+    parser = SafeConfigParser()
+    parser.read('localconfig.ini')
+
+    return parser.get("solr_config", "cert")
 
 
   def doGet(self, params):
     params['wt'] = 'json'
     url = self.base_url + "/" + self.core_name + self._select
-    response = self.client.get(url, params=params)
+    response = self.client.get(url, params=params, cert=self.cert)
     data = json.loads(response.text)
     return data
 
