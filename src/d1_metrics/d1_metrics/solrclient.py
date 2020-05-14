@@ -8,7 +8,7 @@ import datetime
 import json
 import re
 import time
-from ConfigParser import SafeConfigParser
+from configparser import ConfigParser
 
 
 LOG_NAME = "logagg"
@@ -45,16 +45,17 @@ class SolrClient(object):
     self.cert = self._getSolrCert()
 
 
-  def _getSolrCert():
+  def _getSolrCert(self):
     '''
     Returns a solr certificate file for the queries
 
     :return: file certificate  object to query solr
     '''
-    parser = SafeConfigParser()
-    parser.read('localconfig.ini')
+    parser = ConfigParser()
 
-    return parser.get("solr_config", "cert")
+    found_files = parser.read(os.path.join(os.path.dirname(__file__), './../../../', 'localconfig.ini'))
+
+    return(parser.get("solr_config", "cert"))
 
 
   def doGet(self, params):
@@ -178,3 +179,8 @@ class SolrSearchResponseIterator(SolrClient):
         raise StopIteration()
     self.c_record = self.c_record + 1
     return row
+
+
+if __name__ == "__main__":
+  sc = SolrClient("cn/solr", "solr")
+  print(sc.cert)
