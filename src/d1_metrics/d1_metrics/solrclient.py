@@ -42,7 +42,10 @@ class SolrClient(object):
     self._select = select
     self.logger = logging.getLogger(APP_LOG)
     self.client = requests.Session()
-    self.cert = self._getSolrCert()
+    self.parser = ConfigParser()
+    self.parser.read(os.path.join(os.path.dirname(__file__), './../../../', 'localconfig.ini'))
+    if(self.parser.get("solr_config", "load_certs")):
+      self.cert = self._getSolrCert()
 
 
   def _getSolrCert(self):
@@ -51,17 +54,16 @@ class SolrClient(object):
 
     :return: file certificate  object to query solr
     '''
-    parser = ConfigParser()
-
-    found_files = parser.read(os.path.join(os.path.dirname(__file__), './../../../', 'localconfig.ini'))
-
-    return(parser.get("solr_config", "cert"))
+    return(self.parser.get("solr_config", "cert"))
 
 
   def doGet(self, params):
     params['wt'] = 'json'
     url = self.base_url + "/" + self.core_name + self._select
-    response = self.client.get(url, params=params, cert=self.cert)
+    if self.cert:
+      response = self.client.get(url, params=params, cert=self.cert)
+    else:
+      response = self.client.get(url, params=params)
     data = json.loads(response.text)
     return data
 
