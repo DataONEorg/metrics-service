@@ -8,7 +8,7 @@ import datetime
 import json
 import re
 import time
-
+from configparser import ConfigParser
 
 
 LOG_NAME = "logagg"
@@ -42,12 +42,28 @@ class SolrClient(object):
     self._select = select
     self.logger = logging.getLogger(APP_LOG)
     self.client = requests.Session()
+    self.parser = ConfigParser()
+    self.parser.read(os.path.join(os.path.dirname(__file__), './../../../', 'localconfig.ini'))
+    if(self.parser.get("solr_config", "load_certs")):
+      self.cert = self._getSolrCert()
+
+
+  def _getSolrCert(self):
+    '''
+    Returns a solr certificate file for the queries
+
+    :return: file certificate  object to query solr
+    '''
+    return(self.parser.get("solr_config", "cert"))
 
 
   def doGet(self, params):
     params['wt'] = 'json'
     url = self.base_url + "/" + self.core_name + self._select
-    response = self.client.get(url, params=params)
+    if self.cert:
+      response = self.client.get(url, params=params, cert=self.cert)
+    else:
+      response = self.client.get(url, params=params)
     data = json.loads(response.text)
     return data
 
@@ -165,3 +181,8 @@ class SolrSearchResponseIterator(SolrClient):
         raise StopIteration()
     self.c_record = self.c_record + 1
     return row
+
+
+if __name__ == "__main__":
+  sc = SolrClient("cn/solr", "solr")
+  print(sc.cert)
