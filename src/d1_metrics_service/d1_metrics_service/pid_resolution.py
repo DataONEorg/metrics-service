@@ -413,7 +413,7 @@ def getResolvePIDs(PIDs, solr_url=None, use_mm_params=True):
 
 
 #####################################
-# Using the SOLR client to get the portals colletion query
+# Using the SOLR client to get the portals queries
 #
 #####################################
 
@@ -482,6 +482,52 @@ def resolveCollectionQueryFromSolr(url = None, collectionQuery = "*:*"):
   return resolved_collection_identifier
 
 
+def getPortalSID(url = None, portalId = None):
+  """
+  Queries the CN solr to get the Portal SID
+  :param url: SOLR url. By default queries the CN Solr
+  :param portalId: Portal identifier could be either a label, or PID or SID
+
+  :return: SID: Series Identifier for the portal
+  """
+
+  _L, t_0 = _getLogger()
+  # Point to the CN SOLR endpoint by default
+  if url is None:
+    url = "https://cn.dataone.org/cn/v2/query"
+
+
+  # Create a solr client object
+  solrClientObject = SolrClient(url, "solr")
+  seriesId = None
+  resolved_collection_identifier = []
+
+  try:
+    _L.debug("Fetching portal SID")
+
+    # create query and unescape the escaped characters
+    query = "id:" + portalId + " OR label:" + portalId + " OR seriesId:" + portalId
+    escapeQuery = string_escape(query)
+
+    data = solrClientObject.getFieldValues('seriesId', q=escapeQuery)
+
+    if len(data) > 0:
+      seriesId = data["seriesId"][0]
+    else:
+      _L.debug("No Solr results found")
+
+  except:
+    _L.error("Error in fetching collection PIDs")
+
+  return seriesId
+
+
+#####################################
+# Other utilities
+#
+#####################################
+
+
 def string_escape(s, encoding='utf-8'):
   """
     Un-escaping the escaped strings
@@ -542,3 +588,4 @@ if __name__ == "__main__":
   # print("==eg: getResolvePids==")
   # eg_getResolvePids()
   # getPortalCollectionQuery(url="https://dev.nceas.ucsb.edu/knb/d1/mn/v2/query/solr/?", portalLabel="portal-test")
+  print(getPortalSID(url="https://cn.dataone.org/cn/v2/query", portalId="DBO"))
