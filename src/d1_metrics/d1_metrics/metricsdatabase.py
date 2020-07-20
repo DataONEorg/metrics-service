@@ -36,6 +36,7 @@ class MetricsDatabase(object):
         if not config_file is None:
             self.loadConfig(config_file)
 
+
     def loadConfig(self, config_file):
         '''
         Load configuration parameters
@@ -53,6 +54,31 @@ class MetricsDatabase(object):
             self._config[key] = config.get(CONFIG_DATABASE_SECTION, key, fallback=value)
         return self._config
 
+
+    def logConfig(self, filename=None, format=None, level=None):
+        """
+        Sets log config if specified
+
+        :param filename: logger file name
+        :param format: format for the logging message
+        :param level: level of the logger
+
+        :return:
+            None
+        """
+
+        if filename is not None:
+            hdlr = logging.FileHandler(filename)
+            if format is not None:
+                formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+                hdlr.setFormatter(formatter)
+            self._L.addHandler(hdlr)
+
+        if level is not None:
+            self._L.setLevel(logging.WARNING)
+        return
+
+
     def connect(self, force_new=False):
         '''
         Establish a connection to the postgres database
@@ -69,6 +95,7 @@ class MetricsDatabase(object):
         self._L.info("Connecting to {user}@{host}:{port}/{dbname}".format(**self._config))
         self.conn = psycopg2.connect(**self._config)
 
+
     def getCursor(self):
         '''
         Retrieve a cursor for the postgres database, opening connection if necessary.
@@ -78,6 +105,7 @@ class MetricsDatabase(object):
         '''
         self.connect()
         return self.conn.cursor()
+
 
     def _iterRow(self, cursor, num_rows=100):
         '''
@@ -97,6 +125,7 @@ class MetricsDatabase(object):
             for row in rows:
                 yield row
 
+
     def getSingleValue(self, csr, sql):
         '''
         Retrieve a single value from the resultset identifed by a SQL statement
@@ -112,6 +141,7 @@ class MetricsDatabase(object):
         csr.execute(sql)
         row = csr.fetchone()
         return row[0]
+
 
     def initializeDatabase(self, sql_files):
         '''
@@ -129,6 +159,7 @@ class MetricsDatabase(object):
                 self._L.debug("Executing: %s", sql)
                 csr.execute(sql)
         self.conn.commit()
+
 
     def summaryReport(self):
         '''
@@ -148,6 +179,7 @@ class MetricsDatabase(object):
         res["metadata"] = self.getMetadata()
         return res
 
+
     def setMetadataValue(self, k, v):
         '''
         Set a K,V pair in the metadata table
@@ -165,6 +197,7 @@ class MetricsDatabase(object):
         csr = self.getCursor()
         csr.execute(sql, (k, psycopg2.Binary(pickled)))
         self.conn.commit()
+
 
     def getMetadataValue(self, k, default=None):
         '''
@@ -189,6 +222,7 @@ class MetricsDatabase(object):
             self._L.warning("Returning default value for %s", k)
         return default
 
+
     def deleteMetadataValue(self, k):
         '''
         Remove a metadata entry
@@ -204,6 +238,7 @@ class MetricsDatabase(object):
         sql = "DELETE FROM db_metadata WHERE key=%s"
         csr.execute(sql, (k,))
         self.conn.commit()
+
 
     def getMetadata(self):
         '''
@@ -222,6 +257,7 @@ class MetricsDatabase(object):
             res[k] = v
         return res
 
+
     def getCitations(self):
         '''
         Gets citations from the crossref end point
@@ -236,8 +272,8 @@ class MetricsDatabase(object):
         count = 0
         hist = {}
         for i in pref:
-            print()
-            print("Executing for", i)
+            self._L.info()
+            self._L.info("Executing for" + i)
 
             res = requests.get(
                 "https://api.eventdata.crossref.org/v1/events/scholix?source=crossref&obj-id.prefix=" + i)
@@ -260,7 +296,7 @@ class MetricsDatabase(object):
                             values.append(url)
                             values.append(val["LinkPublicationDate"][:10])
                             mdata = requests.get(url, headers=headers)
-                            if (mdata.status_code == 404):
+                            if (mdata.status_code != response.codes.ok):
                                 agency = requests.get("https://api.crossref.org/works/" + source_pid + "/agency/")
                                 agency_body = agency.json()
                                 if (agency_body["message"]["agency"]["label"] == "DataCite"):
@@ -289,8 +325,9 @@ class MetricsDatabase(object):
 
                                 try:
                                     metadata = mdata.json()
-                                except:
-                                    print(doi)
+                                except Exception as e:
+                                    self._L.exception("Metadata conversion error")
+                                    self._L.exception(e)
                                     continue
 
                                 try:
@@ -321,24 +358,25 @@ class MetricsDatabase(object):
                                     csr.execute(sql + (json.dumps(results)).replace("'", r"''") + "','" + (
                                     json.dumps(metadata)).replace("'", r"''") + "','" + "','".join(values) + "');")
                                     if count%5 == 0:
-                                        print("Citation Insertion Count ", str(count))
+                                        self._L.info("Citation Insertion Count " + str(count))
                                 except:
-                                    print("Exception occured")
-                                    print("DOI Error: {0:0=3d}".format(count), " - ", doi)
+                                    self._L.exception("Exception occured")
+                                    self._L.exception("DOI Error: {0:0=3d}".format(count) + " - " + doi)
 
                         except psycopg2.DatabaseError as e:
-                            print('Database error!\n{0}', e)
-                            print()
+                            self._L.exception('Database error!\n{0}')
+                            self._L.exception(e)
                         except psycopg2.OperationalError as e:
-                            print('Operational error!\n{0}', e)
-                            print()
+                            self._L.exception('Operational error!\n{0}')
+                            self._L.exception(e)
                         finally:
                             self.conn.commit()
                             pass
                         break
 
-        print("Queries executed!")
+        self._L.info("Queries executed!")
         return
+
 
     def updateCitationMetadata(self):
         """
@@ -358,9 +396,11 @@ class MetricsDatabase(object):
                 start_doi = i[0].index("10.")
                 pref.append(i[0][start_doi:])
         except psycopg2.DatabaseError as e:
-            print('Database error!\n{0}', e)
+            self._L.exception('Database error!\n{0}')
+            self._L.exception(e)
         except psycopg2.OperationalError as e:
-            print('Operational error!\n{0}', e)
+            self._L.exception('Operational error!\n{0}')
+            self._L.exception(e)
         finally:
             self.conn.commit()
 
@@ -374,7 +414,7 @@ class MetricsDatabase(object):
                     agency = requests.get("https://api.crossref.org/works/" + doi + "/agency/")
                     agency_body = agency.json()
                     if (agency_body["message"]["agency"]["label"] == "DataCite"):
-                        print("DataCite")
+
                         mdata = requests.get("https://api.datacite.org/works/" + doi)
                         metadata = mdata.json()
                         author = []
@@ -388,7 +428,7 @@ class MetricsDatabase(object):
                         values.append((metadata["data"]["attributes"]["container-title"]).replace("'", r"''"))
                         values.append(str(metadata["data"]["attributes"]["published"]))
                     if (agency_body["message"]["agency"]["label"] == "Crossref"):
-                        print("Crossref")
+
                         mdata = requests.get("https://api.datacite.org/works/" + doi)
                         metadata = mdata.json()
                         values.append(
@@ -400,7 +440,7 @@ class MetricsDatabase(object):
                         values.append(str(metadata["message"]["created"]["date-parts"][0][0]))
                 else:
                     # Format the response retrieved from the doi resolving endpoint and save it to a dictionary
-                    print("DOI Endpoint")
+
                     mdata_resp = mdata.text[6:-1]
                     mdata_list = mdata_resp.split("\n")
                     metadata = {}
@@ -415,17 +455,20 @@ class MetricsDatabase(object):
                     values.append(metadata["year"].replace("'", r"''"))
                 condition = "WHERE source_id = '" + doi + "'"
                 csr.execute(sql + "', '".join(values) + "')" + condition + ";")
-                print("Record updated")
+                self._L.info("Record updated")
 
             except psycopg2.DatabaseError as e:
-                print('Database error!\n{0}', e)
+                self._L.exception('Database error!\n{0}')
+                self._L.exception(e)
             except psycopg2.OperationalError as e:
-                print('Operational error!\n{0}', e)
+                self._L.exception('Operational error!\n{0}')
+                self._L.exception(e)
             finally:
                 self.conn.commit()
 
-        print("Queries executed!")
+        self._L.info("Queries executed!")
         return
+
 
     def getDOIs(self):
         """
@@ -446,7 +489,7 @@ class MetricsDatabase(object):
             try:
                 start_doi = hit.index("10.")
             except:
-                print(hit)
+                self._L.info(hit)
                 continue
 
             doi.append(hit)
@@ -461,15 +504,16 @@ class MetricsDatabase(object):
             try:
                 start_doi = hit.index("10.")
             except:
-                print(hit)
+                self._L.info(hit)
                 continue
 
             doi.append(hit)
             prefixes.append(hit[start_doi:start_doi + 7])
         dois = set(doi)
         pref = set(prefixes)
-        print(pref)
+        self._L.info(pref)
         return dois, pref
+
 
     def getTargetCitationMetadata(self):
         """
@@ -498,30 +542,47 @@ class MetricsDatabase(object):
             unique_pids = set(target_pids)
 
             for i in unique_pids:
+
+                # check if https DOI format
+                if "https" in i:
+                    self._L.info("DOI https format: ", i)
+                    pass
+
+
+                # if the doi identifier is missing DOI keyword;
+                if "10." in i[0,3]:
+                    identifier = "doi:" + i
+                    self._L.info("DOI format : ", identifier)
+
                 response = self.query_solr(q="*" + i + "*")
-                results = response["response"]
-                if results["numFound"] > 0:
-                    for j in results["docs"]:
-                        if "origin" in j and "authoritativeMN" in j:
-                            origin = j["origin"]
-                            authoritativeMN = j["authoritativeMN"]
 
-                            for k in range(len(origin)):
-                                if "," in origin[k]:
-                                    origin[k] = origin[k].replace(",", r"\,")
+                if len(response) > 0:
+                    results = response["response"]
+                    if results["numFound"] > 0:
+                        for j in results["docs"]:
+                            if "origin" in j and "authoritativeMN" in j:
+                                origin = j["origin"]
+                                authoritativeMN = j["authoritativeMN"]
 
-                            csr.execute("INSERT INTO CITATION_METADATA VALUES (DEFAULT,'"+i.replace("'", r"''")+"','{" + (",".join(origin)).replace("'", r"''")+"}','{" + authoritativeMN.replace("'", r"''") +"}',NULL,NULL);")
-                            break
+                                for k in range(len(origin)):
+                                    if "," in origin[k]:
+                                        origin[k] = origin[k].replace(",", r"\,")
+
+                                csr.execute("INSERT INTO CITATION_METADATA VALUES (DEFAULT,'"+i.replace("'", r"''")+"','{" + (",".join(origin)).replace("'", r"''")+"}','{" + authoritativeMN.replace("'", r"''") +"}',NULL);")
+                                break
+                else:
+                    self._L.exception("solr error for id: " + i)
 
         except psycopg2.DatabaseError as e:
-            print('Database error!\n{0}', e)
-            print()
+            self._L.exception('Database error!\n{0}')
+            self._L.exception(e)
         except psycopg2.OperationalError as e:
-            print('Operational error!\n{0}', e)
-            print()
+            self._L.exception('Operational error!\n{0}')
+            self._L.exception(e)
         finally:
             self.conn.commit()
-            pass
+        return
+
 
     def query_solr(self, q):
         """
@@ -536,10 +597,153 @@ class MetricsDatabase(object):
 
         response = requests.get(url=self.solr_query_url, params=queryString)
 
-        return response.json()
+        if response.status_code == 200:
+            return response.json()
+
+        return {}
+
+
+    def getDOIMetadata(self, doi):
+        """
+        Takes a DOI identifier string and fetches it metadata
+
+        :param doi:
+        :return:
+        """
+        values = []
+
+        # get the DOI resolving agency
+        agency = requests.get("https://api.crossref.org/works/" + doi + "/agency/")
+        agency_body = agency.json()
+
+        try:
+
+            # If Datacite DOI - query Datacite REST endpoint
+            if (agency_body["message"]["agency"]["label"] == "DataCite"):
+
+                mdata = requests.get("https://api.datacite.org/works/" + doi)
+                metadata = mdata.json()
+                author = []
+                for i in metadata["data"]["attributes"]["author"]:
+                    if "given" in i:
+                        author.append((i["given"] + " " + i["family"]))
+                    else:
+                        author.append(i["literal"])
+                values.append(", ".join(author).replace("'", r"''"))
+                values.append((metadata["data"]["attributes"]["title"]).replace("'", r"''"))
+                values.append((metadata["data"]["attributes"]["container-title"]).replace("'", r"''"))
+                values.append(str(metadata["data"]["attributes"]["published"]))
+
+            # If Crossref DOI - query Crossref REST endpoint
+            if (agency_body["message"]["agency"]["label"] == "Crossref"):
+
+                mdata = requests.get("https://api.datacite.org/works/" + doi)
+                metadata = mdata.json()
+                values.append(
+                    (
+                        ", ".join((i["given"] + " " + i["family"]) for i in metadata["message"]["author"])).replace(
+                        "'", r"''"))
+                values.append((metadata["message"]["title"][0]).replace("'", r"''"))
+                values.append((metadata["message"]["publisher"]).replace("'", r"''"))
+                values.append(str(metadata["message"]["created"]["date-parts"][0][0]))
+
+        except Exception as e:
+            self._L.exception('DOI Metadata Resolution error!\n{0}')
+            self._L.exception(e)
+
+        return values
+
+
+    def insertCitationObjects(self, citations_data = None, read_citations_from_file = None):
+        """
+        This method performs the insertion of citation objects to the DataONE Citations database
+        The citations getting iserted could be either one of the following:
+            1. A citation retrieved from the Crossref / DataONE citation
+            2. A citation read from the JSON file containing citation object
+            3.
+
+        :param citations_data:
+        :param read_citations_from_file: the name of the file containing metadata
+        :return:
+        """
+
+        # Assign a default empty value if citations data is not provided
+        if not citations_data:
+            citations_data = {}
+
+        # Read the metadata from the file object if file is provided
+        if read_citations_from_file:
+            citations_data = self.parseCitationsFromDisk(read_citations_from_file)
+
+        csr = self.getCursor()
+        sql = "INSERT INTO CITATIONS(id, report, metadata, target_id, source_id, source_url, link_publication_date, origin, title, " + \
+              "publisher, journal, volume, page, year_of_publishing) values ( DEFAULT,'"
+
+        for citation_object in citation_data:
+            self._L.info("\n")
+            self._L.info("Executing for", citation_object)
+
+            results = {}
+            metadata = citation_object
+            values = []
+
+            try:
+
+                try:
+                    values.append(citation_object["target_id"].replace("'", r"''"))
+                    values.append(citation_object["source_id"].replace("'", r"''"))
+                    values.append(citation_object["source_url"].replace("'", r"''"))
+                    values.append(citation_object["link_publication_date"])
+                    values.append(", ".join(citation_object["origin"]).replace("'", r"''"))
+                    values.append(citation_object["title"].replace("'", r"''"))
+                    values.append(citation_object["publisher"].replace("'", r"''"))
+                    values.append(citation_object["journal"].replace("'", r"''"))
+                    values.append(citation_object["volume"].replace("'", r"''"))
+                    values.append(citation_object["page"].replace("'", r"''"))
+                    values.append(str(citation_object["year_of_publishing"]))
+
+                except:
+                    self._L.exception("Object missing information - " + citation_object)
+                    continue
+
+                csr.execute(sql + (json.dumps(results)).replace("'", r"''") + "','" + (
+                    json.dumps(metadata)).replace("'", r"''") + "','" + "','".join(values) + "');")
+
+            except psycopg2.DatabaseError as e:
+                message = 'Database error! ' + e
+                self._L.exception('Operational error!\n{0}')
+                self._L.exception(e)
+            except psycopg2.OperationalError as e:
+                self._L.exception('Operational error!\n{0}')
+                self._L.exception(e)
+
+            finally:
+                self._L.info("Inserted: " + citation_object["target_id"])
+                self.conn.commit()
+
+        return
+
+
+    def parseCitationsFromDisk(self, file_name):
+        """
+        Reads the citation objects from file
+
+        :param file_name:
+
+        :return: an array of citaiton objects to be inserted into the Metrics Service
+        """
+        file_object = open(file_name,)
+
+        # reading in the JOSN object
+        citation_data = json.load(file_object)
+
+        return citation_data
 
 
 if __name__ == "__main__":
     md = MetricsDatabase()
-    md.getTargetCitationMetadata()
+    md.logConfig("metricsdatabase.log","%(name)s - %(levelname)s - %(message)s", "INFO")
+    # md.parseCitationsFromDisk("PLOS.json")
+    # md.parseCitationsFromDisk("Springer.json")
+    # md.getTargetCitationMetadata()
     # md.getDOIs()
