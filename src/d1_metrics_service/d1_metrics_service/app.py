@@ -12,7 +12,7 @@ import falcon
 import logging
 
 from d1_metrics_service.metricsreader import MetricsReader
-from d1_metrics_Service.citationsmanager import CitationsManager
+from d1_metrics_service.citationsmanager import CitationsManager
 
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s %(name)18s: %(message)s'

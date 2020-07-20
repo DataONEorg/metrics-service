@@ -18,6 +18,9 @@ from datetime import datetime, timedelta
 from urllib.parse import quote_plus, unquote, urlparse
 
 
+from d1_metrics.metricsdatabase import  MetricsDatabase
+
+
 DEFAULT_CITATIONS_CONFIGURATION = {
     "solr_query_url": "https://cn.dataone.org/cn/v2/query/solr/"
 }
@@ -107,4 +110,35 @@ class CitationsManager:
         :param citations_request:
         :return:
         """
+        if (citations_request["request_type"] == "dataset"):
+            return (self.process_dataset_citation_registration(citations_request))
+
+        if (citations_request["request_type"] == "batch"):
+            return (self.process_batch_citation_registration(citations_request))
+
         return {}
+
+
+    def process_dataset_citation_registration(self, citations_request):
+        """
+
+        :param citations_request:
+        :return:
+        """
+        response = {
+            "message": "Submission successful"
+        }
+
+        if citations_request["metadata"][0]["target_id"] is not None:
+            target_id = citations_request["metadata"][0]["target_id"]
+
+        if citations_request["metadata"][0]["target_id"] is not None:
+            source_id = citations_request["metadata"][0]["source_id"]
+
+        if citations_request["metadata"][0]["target_id"] is not None:
+            relation_type = citations_request["metadata"][0]["relation_type"]
+
+        # retrieve metadata from
+
+
+        return response
