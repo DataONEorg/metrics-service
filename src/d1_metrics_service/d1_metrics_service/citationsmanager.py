@@ -44,6 +44,7 @@ class CitationsManager:
         self.logger = logging.getLogger('citations_service.' + __name__)
 
 
+
     def on_get(self, req, resp):
         """
         The method assigned to the GET end point
@@ -95,12 +96,18 @@ class CitationsManager:
 
         citations_request = json.loads(request_string)
 
-        resp.body = json.dumps(self.process_request(citations_request), ensure_ascii=False)
+        response = self.process_request(citations_request)
+        resp.body = json.dumps(response, ensure_ascii=False)
 
         # The following line can be omitted because 200 is the default
         # status returned by the framework, but it is included here to
         # illustrate how this may be overridden as needed.
-        resp.status = falcon.HTTP_200
+        if (response["status_code"] == "200"):
+            resp.status = falcon.HTTP_200
+
+        if (response["status_code"] == "404"):
+            resp.status = falcon.HTTP_400
+
         self.logger.debug("exit on_post")
 
 
@@ -110,13 +117,22 @@ class CitationsManager:
         :param citations_request:
         :return:
         """
+        response = {
+            "message": "Submission successful"
+        }
+
         if (citations_request["request_type"] == "dataset"):
-            return (self.process_dataset_citation_registration(citations_request))
+            self.process_dataset_citation_registration(citations_request)
+            response["status_code"] = "200"
+            return response
 
         if (citations_request["request_type"] == "batch"):
-            return (self.process_batch_citation_registration(citations_request))
+            self.process_batch_citation_registration(citations_request)
+            response["status_code"] = "200"
+            return response
 
-        return {}
+        response["status_code"] = "404"
+        return response
 
 
     def process_dataset_citation_registration(self, citations_request):
@@ -125,20 +141,29 @@ class CitationsManager:
         :param citations_request:
         :return:
         """
-        response = {
-            "message": "Submission successful"
-        }
-
         if citations_request["metadata"][0]["target_id"] is not None:
             target_id = citations_request["metadata"][0]["target_id"]
+            target_doi_start = target_id.index("10.")
+            target_doi = target_id[target_doi_start:]
 
         if citations_request["metadata"][0]["target_id"] is not None:
             source_id = citations_request["metadata"][0]["source_id"]
+            source_doi_start = source_id.index("10.")
+            source_doi = source_id[source_doi_start:]
 
         if citations_request["metadata"][0]["target_id"] is not None:
             relation_type = citations_request["metadata"][0]["relation_type"]
 
-        # retrieve metadata from
+        metrics_database = MetricsDatabase()
 
+        # retrieve metadata from Metrics Database
+        citation_object = metrics_database.getDOIMetadata(source_doi)
+        citation_object["source_id"] = source_doi
+        citation_object["target_id"] = target_id
 
-        return response
+        citations_metadata = []
+        citations_metadata.append(citation_object)
+
+        metrics_database.insertCitationObjects(citations_data=citations_metadata)
+
+        return

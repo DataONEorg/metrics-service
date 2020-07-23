@@ -12,6 +12,7 @@ from d1_metrics import common
 from d1_metrics.metricselasticsearch import MetricsElasticSearch
 import requests
 from d1_metrics import solrclient
+from datetime import datetime, timedelta
 
 CONFIG_DATABASE_SECTION = "database"
 DEFAULT_DB_CONFIG = {
@@ -266,7 +267,7 @@ class MetricsDatabase(object):
 
         dois, pref = self.getDOIs()
         csr = self.getCursor()
-        sql = "INSERT INTO CITATIONS(id, report, metadata, target_id, source_id, source_url, link_publication_date, origin, title, " + \
+        sql = "INSERT INTO CITATIONS_TEST(id, report, metadata, target_id, source_id, source_url, link_publication_date, origin, title, " + \
               "publisher, journal, volume, page, year_of_publishing) values ( DEFAULT,'"
 
         count = 0
@@ -387,7 +388,7 @@ class MetricsDatabase(object):
         csr = self.getCursor()
 
         getSourcePIDs = "SELECT source_id FROM CITATIONS;"
-        sql = "UPDATE CITATIONS SET (origin, title, publisher, year_of_publishing) = ('"
+        sql = "UPDATE CITATIONS_TEST SET (origin, title, publisher, year_of_publishing) = ('"
         pref = []
         try:
             csr.execute(getSourcePIDs)
@@ -429,7 +430,7 @@ class MetricsDatabase(object):
                         values.append(str(metadata["data"]["attributes"]["published"]))
                     if (agency_body["message"]["agency"]["label"] == "Crossref"):
 
-                        mdata = requests.get("https://api.datacite.org/works/" + doi)
+                        mdata = requests.get("https://api.crossref.org/works/" + doi)
                         metadata = mdata.json()
                         values.append(
                             (
@@ -610,7 +611,7 @@ class MetricsDatabase(object):
         :param doi:
         :return:
         """
-        values = []
+        doi_metadata = {}
 
         # get the DOI resolving agency
         agency = requests.get("https://api.crossref.org/works/" + doi + "/agency/")
@@ -629,29 +630,37 @@ class MetricsDatabase(object):
                         author.append((i["given"] + " " + i["family"]))
                     else:
                         author.append(i["literal"])
-                values.append(", ".join(author).replace("'", r"''"))
-                values.append((metadata["data"]["attributes"]["title"]).replace("'", r"''"))
-                values.append((metadata["data"]["attributes"]["container-title"]).replace("'", r"''"))
-                values.append(str(metadata["data"]["attributes"]["published"]))
+                doi_metadata["origin"] = author
+                doi_metadata["title"] = metadata["data"]["attributes"]["title"]
+                doi_metadata["publisher"] = metadata["data"]["attributes"]["container-title"]
+                doi_metadata["year_of_publishing"] = str(metadata["data"]["attributes"]["published"])
+                doi_metadata["source_url"] = "https://doi.org/" + doi
+
 
             # If Crossref DOI - query Crossref REST endpoint
             if (agency_body["message"]["agency"]["label"] == "Crossref"):
 
-                mdata = requests.get("https://api.datacite.org/works/" + doi)
+                mdata = requests.get("https://api.crossref.org/works/" + doi)
                 metadata = mdata.json()
-                values.append(
-                    (
-                        ", ".join((i["given"] + " " + i["family"]) for i in metadata["message"]["author"])).replace(
-                        "'", r"''"))
-                values.append((metadata["message"]["title"][0]).replace("'", r"''"))
-                values.append((metadata["message"]["publisher"]).replace("'", r"''"))
-                values.append(str(metadata["message"]["created"]["date-parts"][0][0]))
+                author = []
+                for i in metadata["message"]["author"]:
+                    if "given" in i:
+                        author.append((i["given"] + " " + i["family"]))
+                doi_metadata["origin"] =  author
+                doi_metadata["title"] = metadata["message"]["title"][0]
+                doi_metadata["publisher"] = metadata["message"]["publisher"]
+                doi_metadata["year_of_publishing"] = str(metadata["message"]["created"]["date-parts"][0][0])
+                doi_metadata["source_url"] = "https://doi.org/" + doi
+                doi_metadata["journal"] = metadata["message"]["container-title"][0]
+                doi_metadata["volume"] = metadata["message"]["volume"]
+                doi_metadata["page"] = metadata["message"]["page"]
+                doi_metadata["link_publication_date"] = datetime.today().strftime('%Y-%m-%d')
 
         except Exception as e:
             self._L.exception('DOI Metadata Resolution error!\n{0}')
             self._L.exception(e)
 
-        return values
+        return doi_metadata
 
 
     def insertCitationObjects(self, citations_data = None, read_citations_from_file = None):
@@ -676,10 +685,10 @@ class MetricsDatabase(object):
             citations_data = self.parseCitationsFromDisk(read_citations_from_file)
 
         csr = self.getCursor()
-        sql = "INSERT INTO CITATIONS(id, report, metadata, target_id, source_id, source_url, link_publication_date, origin, title, " + \
+        sql = "INSERT INTO CITATIONS_TEST(id, report, metadata, target_id, source_id, source_url, link_publication_date, origin, title, " + \
               "publisher, journal, volume, page, year_of_publishing) values ( DEFAULT,'"
 
-        for citation_object in citation_data:
+        for citation_object in citations_data:
             self._L.info("\n")
             self._L.info("Executing for", citation_object)
 
