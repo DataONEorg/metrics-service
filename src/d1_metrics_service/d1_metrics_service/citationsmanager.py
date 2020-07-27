@@ -106,6 +106,9 @@ class CitationsManager:
             resp.status = falcon.HTTP_200
 
         if (response["status_code"] == "404"):
+            resp.status = falcon.HTTP_404
+
+        if (response["status_code"] == "400"):
             resp.status = falcon.HTTP_400
 
         self.logger.debug("exit on_post")
@@ -118,20 +121,42 @@ class CitationsManager:
         :return:
         """
         response = {
-            "message": "Submission successful"
+            "message": "Cannot process this type of request",
+            "status_code": "500"
         }
 
         if (citations_request["request_type"] == "dataset"):
-            self.process_dataset_citation_registration(citations_request)
-            response["status_code"] = "200"
-            return response
+            return self.queue_citation_object(citations_request)
+
 
         if (citations_request["request_type"] == "batch"):
-            self.process_batch_citation_registration(citations_request)
-            response["status_code"] = "200"
-            return response
+            return self.queue_citation_object(citations_request)
 
-        response["status_code"] = "404"
+        return response
+
+
+    def queue_citation_object(self, citations_request):
+        """
+
+        :param citations_request:
+        :return:
+        """
+        response = {
+            "message": "",
+            "status_code": ""
+        }
+
+        try:
+            metrics_database = MetricsDatabase()
+            metrics_database.queueCitationRequest(citations_request)
+            response["message"] = "Successful"
+            response["status_code"] = "200"
+        except Exception as e:
+            response["message"] = e
+            response["status_code"] = "404"
+        finally:
+            pass
+
         return response
 
 
@@ -141,6 +166,10 @@ class CitationsManager:
         :param citations_request:
         :return:
         """
+        response = {
+            "message": "Submission successful"
+        }
+
         if citations_request["metadata"][0]["target_id"] is not None:
             target_id = citations_request["metadata"][0]["target_id"]
             target_doi_start = target_id.index("10.")
@@ -163,7 +192,10 @@ class CitationsManager:
 
         citations_metadata = []
         citations_metadata.append(citation_object)
+        try:
+            metrics_database.queueCitationRequest(citations_request)
+        except Exception as e:
+            pass
 
-        metrics_database.insertCitationObjects(citations_data=citations_metadata)
 
-        return
+        return None

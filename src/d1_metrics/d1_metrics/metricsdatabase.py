@@ -749,6 +749,43 @@ class MetricsDatabase(object):
         return citation_data
 
 
+    def queueCitationRequest(self, request_object):
+        csr = self.getCursor()
+
+        sql = "INSERT INTO citations_registration_queue_test (id, request, receive_timestamp, ingest_attempts) VALUES ( DEFAULT, '"
+        try:
+            csr.execute(sql + (json.dumps(request_object)).replace("'", r"''") + "','" + str(datetime.now()) + "',0);" )
+
+        except psycopg2.DatabaseError as e:
+            self._L.exception('Database error!\n{0}')
+            self._L.exception(e)
+        except psycopg2.OperationalError as e:
+            self._L.exception('Operational error!\n{0}')
+            self._L.exception(e)
+        except Exception as e:
+            self._L.exception('Exception occured!\n{0}')
+            self._L.exception(e)
+        finally:
+            self.conn.commit()
+
+
+    def parseQueuedCitationRequests(self):
+        csr = self.getCursor()
+
+        sql = "SELECT * FROM citations_registration_queue_test;"
+        try:
+            csr.execute(sql)
+
+        except psycopg2.DatabaseError as e:
+            self._L.exception('Database error!\n{0}')
+            self._L.exception(e)
+        except psycopg2.OperationalError as e:
+            self._L.exception('Operational error!\n{0}')
+            self._L.exception(e)
+        finally:
+            self.conn.commit()
+
+
 if __name__ == "__main__":
     md = MetricsDatabase()
     md.logConfig("metricsdatabase.log","%(name)s - %(levelname)s - %(message)s", "INFO")
@@ -756,3 +793,5 @@ if __name__ == "__main__":
     # md.parseCitationsFromDisk("Springer.json")
     # md.getTargetCitationMetadata()
     # md.getDOIs()
+    # md.queueCitationRequest(req)
+    # md.parseQueuedCitationRequests()
