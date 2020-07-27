@@ -411,7 +411,7 @@ class MetricsReader:
             metrics_database = MetricsDatabase()
             metrics_database.connect()
         csr = metrics_database.getCursor()
-        sql = 'SELECT target_id,source_id,source_url,link_publication_date,origin,title,publisher,journal,volume,page,year_of_publishing FROM citations_test;'
+        sql = 'SELECT target_id,source_id,source_url,link_publication_date,origin,title,publisher,journal,volume,page,year_of_publishing FROM citations;'
 
         citations = []
         citationCount = 0

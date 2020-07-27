@@ -267,7 +267,7 @@ class MetricsDatabase(object):
 
         dois, pref = self.getDOIs()
         csr = self.getCursor()
-        sql = "INSERT INTO CITATIONS_TEST(id, report, metadata, target_id, source_id, source_url, link_publication_date, origin, title, " + \
+        sql = "INSERT INTO CITATIONS (id, report, metadata, target_id, source_id, source_url, link_publication_date, origin, title, " + \
               "publisher, journal, volume, page, year_of_publishing) values ( DEFAULT,'"
 
         count = 0
@@ -388,7 +388,7 @@ class MetricsDatabase(object):
         csr = self.getCursor()
 
         getSourcePIDs = "SELECT source_id FROM CITATIONS;"
-        sql = "UPDATE CITATIONS_TEST SET (origin, title, publisher, year_of_publishing) = ('"
+        sql = "UPDATE CITATIONS SET (origin, title, publisher, year_of_publishing) = ('"
         pref = []
         try:
             csr.execute(getSourcePIDs)
@@ -669,7 +669,7 @@ class MetricsDatabase(object):
         The citations getting iserted could be either one of the following:
             1. A citation retrieved from the Crossref / DataONE citation
             2. A citation read from the JSON file containing citation object
-            3.
+            3. A citation request registered to the Citations endpoint
 
         :param citations_data:
         :param read_citations_from_file: the name of the file containing metadata
@@ -678,14 +678,14 @@ class MetricsDatabase(object):
 
         # Assign a default empty value if citations data is not provided
         if not citations_data:
-            citations_data = {}
+            citations_data = []
 
         # Read the metadata from the file object if file is provided
         if read_citations_from_file:
             citations_data = self.parseCitationsFromDisk(read_citations_from_file)
 
         csr = self.getCursor()
-        sql = "INSERT INTO CITATIONS_TEST(id, report, metadata, target_id, source_id, source_url, link_publication_date, origin, title, " + \
+        sql = "INSERT INTO CITATIONS (id, report, metadata, target_id, source_id, source_url, link_publication_date, origin, title, " + \
               "publisher, journal, volume, page, year_of_publishing) values ( DEFAULT,'"
 
         for citation_object in citations_data:
@@ -750,11 +750,21 @@ class MetricsDatabase(object):
 
 
     def queueCitationRequest(self, request_object):
+        """
+        Stores the Citation request object to the database
+        :param request_object:
+        :return: None
+        """
         csr = self.getCursor()
 
-        sql = "INSERT INTO citations_registration_queue_test (id, request, receive_timestamp, ingest_attempts) VALUES ( DEFAULT, '"
+        # citation_source - by default is the API
+        citation_source = "DataONE Metrics Service"
+        if "citation_source" in request_object:
+            citation_source = request_object["citation_source"]
+
+        sql = "INSERT INTO citations_registration_queue (id, request, receive_timestamp, citation_source, ingest_attempts) VALUES ( DEFAULT, '"
         try:
-            csr.execute(sql + (json.dumps(request_object)).replace("'", r"''") + "','" + str(datetime.now()) + "',0);" )
+            csr.execute(sql + (json.dumps(request_object)).replace("'", r"''") + "','" + citation_source.replace("'", r"''") + str(datetime.now()) + "',0);" )
 
         except psycopg2.DatabaseError as e:
             self._L.exception('Database error!\n{0}')
@@ -767,14 +777,21 @@ class MetricsDatabase(object):
             self._L.exception(e)
         finally:
             self.conn.commit()
+        return
 
 
     def parseQueuedCitationRequests(self):
+        """
+        Retrieves parsed citation from citations registration queue
+        :return:
+        """
         csr = self.getCursor()
+        li_citation_objects = []
 
-        sql = "SELECT * FROM citations_registration_queue_test;"
+        sql = "SELECT * FROM citations_registration_queue;"
         try:
             csr.execute(sql)
+            li_citation_objects = csr.fetchall()
 
         except psycopg2.DatabaseError as e:
             self._L.exception('Database error!\n{0}')
@@ -784,6 +801,37 @@ class MetricsDatabase(object):
             self._L.exception(e)
         finally:
             self.conn.commit()
+
+        return li_citation_objects
+
+
+    def processCitationQueueObject(self, citations_request):
+        """
+        Handles registration of a Citations queue object to the Citations table
+        :param citations_request:
+        :return:
+        """
+        if citations_request["metadata"][0]["target_id"] is not None:
+            target_id = citations_request["metadata"][0]["target_id"]
+            target_doi_start = target_id.index("10.")
+            target_doi = target_id[target_doi_start:]
+
+        if citations_request["metadata"][0]["target_id"] is not None:
+            source_id = citations_request["metadata"][0]["source_id"]
+            source_doi_start = source_id.index("10.")
+            source_doi = source_id[source_doi_start:]
+
+        if citations_request["metadata"][0]["target_id"] is not None:
+            relation_type = citations_request["metadata"][0]["relation_type"]
+
+        # retrieve metadata from Metrics Database
+        citation_object = self.getDOIMetadata(source_doi)
+        citation_object["source_id"] = source_doi
+        citation_object["target_id"] = target_id
+
+        citations_data = []
+        citations_data.append(citation_object)
+        self.insertCitationObjects(citations_data=citations_data)
 
 
 if __name__ == "__main__":
@@ -795,3 +843,15 @@ if __name__ == "__main__":
     # md.getDOIs()
     # md.queueCitationRequest(req)
     # md.parseQueuedCitationRequests()
+    # citation_object = {
+    #   "request_type": "dataset",
+    #   "metadata":
+    #   [
+    #     {
+    #         "target_id" : "DOI:10.5060/DATAONEDOI3",
+    #         "source_id" : "DOI:10.1002/ppp.695",
+    #         "relation_type" : "isCitedBy"
+    #     }
+    #   ]
+    # }
+    # md.processCitationQueueObject(citation_object)
