@@ -406,6 +406,7 @@ class MetricsReader:
         # Retreive the citations if any!
         t_0 = time.time()
         self.logger.debug("enter gatherCitations")
+        self.logger.debug("enter gatherCitations")
         if metrics_database is None:
             metrics_database = MetricsDatabase()
             metrics_database.connect()
