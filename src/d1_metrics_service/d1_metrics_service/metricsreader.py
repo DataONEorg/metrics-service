@@ -71,14 +71,15 @@ class MetricsReader:
 
         if ("=" in query_param.query):
             metrics_request = json.loads((query_param.query).split("=", 1)[1])
-            resp.body = json.dumps(self.process_request(metrics_request), ensure_ascii=False)
+            metrics_response = self.process_request(metrics_request)
+            resp.body = json.dumps(metrics_response, ensure_ascii=False)
         else:
             resp.body = json.dumps(metrics_request, ensure_ascii=False)
 
-        # The following line can be omitted because 200 is the default
-        # status returned by the framework, but it is included here to
-        # illustrate how this may be overridden as needed.
-        resp.status = falcon.HTTP_200
+        if "status_code" in metrics_response["resultDetails"]:
+            resp.status = metrics_response["resultDetails"]["status_code"]
+        else:
+            resp.status = falcon.HTTP_200
         resp.set_headers({"Expires": expiry_time.strftime("%a, %d %b %Y %H:%M:%S GMT")})
         self.logger.debug("exit on_get")
 
@@ -94,13 +95,14 @@ class MetricsReader:
         request_string = req.stream.read().decode('utf8')
 
         metrics_request = json.loads(request_string)
+        metrics_response = self.process_request(metrics_request)
+        resp.body = json.dumps(metrics_response, ensure_ascii=False)
 
-        resp.body = json.dumps(self.process_request(metrics_request), ensure_ascii=False)
+        if "status_code" in metrics_response["resultDetails"]:
+            resp.status = metrics_response["resultDetails"]["status_code"]
+        else:
+            resp.status = falcon.HTTP_200
 
-        # The following line can be omitted because 200 is the default
-        # status returned by the framework, but it is included here to
-        # illustrate how this may be overridden as needed.
-        resp.status = falcon.HTTP_200
         self.logger.debug("exit on_post")
 
 
@@ -139,16 +141,20 @@ class MetricsReader:
                 results, resultDetails = self.getMetricsPerRepository(filter_by[0]["values"][0])
 
             if (filter_type == "user") and interpret_as == "list":
-                    # Called when generating metrics for a specific user
-                    results, resultDetails = self.getMetricsPerUser(filter_by[0]["values"])
+                # Called when generating metrics for a specific user
+                results, resultDetails = self.getMetricsPerUser(filter_by[0]["values"])
 
             if (filter_type == "group") and interpret_as == "list":
-                    # Called when generating metrics for a specific user
-                    results, resultDetails = self.getMetricsPerGroup(filter_by[0]["values"])
+                # Called when generating metrics for a specific user
+                results, resultDetails = self.getMetricsPerGroup(filter_by[0]["values"])
 
             if (filter_type == "portal") and interpret_as == "list":
-                    # Called when generating metrics for a specific portal
-                    results, resultDetails = self.getMetricsPerPortal(filter_by[0]["values"][0])
+                collectionQueryFilterObject = {}
+                collectionQueryFilterObjectList = list(filter(lambda filter_object: filter_object['filterType'] == 'query', filter_by))
+                if ( len(collectionQueryFilterObjectList) ):
+                    collectionQueryFilterObject = collectionQueryFilterObjectList[0]
+                # Called when generating metrics for a specific portal
+                results, resultDetails = self.getMetricsPerPortal(filter_by[0]["values"][0], collectionQueryFilterObject)
 
         self.response["results"] = results
         self.response["resultDetails"] = resultDetails
@@ -1290,7 +1296,7 @@ class MetricsReader:
                 return (pid_resolution.getResolvePIDs(temp_array))
 
 
-    def getMetricsPerPortal(self, portalLabel):
+    def getMetricsPerPortal(self, portalLabel, collectionQueryFilterObject = None):
         """
             Handles the Metrics generation for a given portal
             :param: portal label
@@ -1339,8 +1345,19 @@ class MetricsReader:
                         aggType = "year"
                 self.logger.debug('aggType: %s', aggType)
 
-        # Retrieving collection Query
-        collectionQuery = pid_resolution.getPortalCollectionQueryFromSolr(url = None, portalLabel = portalLabel)
+        collectionQuery = None
+        if collectionQueryFilterObject:
+            collectionQuery = collectionQueryFilterObject["values"][0]
+            resultDetails["passedQuery"] = collectionQuery
+        else:
+            # Retrieving collection Query
+            collectionQuery = pid_resolution.getPortalCollectionQueryFromSolr(url=None, portalLabel=portalLabel)
+
+        if collectionQuery is None:
+            results["error"] = "Operational error: Couldn't retrieve collection query"
+            resultDetails["status_code"] = falcon.HTTP_500
+            return results, resultDetails
+
         collectionQuery = collectionQuery.replace('-obsoletedBy:* AND ', '')
 
         resultDetails["collection_query"] = collectionQuery

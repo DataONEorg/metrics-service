@@ -418,7 +418,7 @@ def getResolvePIDs(PIDs, solr_url=None, use_mm_params=True):
 #####################################
 
 
-def getPortalCollectionQueryFromSolr(url = None, portalLabel = None, pid = None, seriesId = None):
+def getPortalCollectionQueryFromSolr(url = None, portalLabel = None):
     """
       Returns the collection query for the portal
       :param: url
@@ -429,24 +429,26 @@ def getPortalCollectionQueryFromSolr(url = None, portalLabel = None, pid = None,
       :returns:
         CollectionQuery string retrieved from SOLR
     """
-    if url is None:
-      url = "https://cn.dataone.org/cn/v2/query"
+    _L, t_0 = _getLogger()
+    try:
+      if url is None:
+        url = "https://cn.dataone.org/cn/v2/query"
 
-    # Create a solr client object
-    solrClientObject = SolrClient(url, "solr")
-    solrQuery = "*:*"
+      # Create a solr client object
+      solrClientObject = SolrClient(url, "solr")
+      solrQuery = "*:*"
 
-    # supports retrieval of collection query via portal label, seriesId and PID
-    if (portalLabel is not None) or (seriesId is not None):
-      if portalLabel:
-        solrQuery = "(-obsoletedBy:* AND (label:" + portalLabel + "))"
-      if seriesId:
-        solrQuery = "(-obsoletedBy:* AND (seriesId:" + seriesId + "))"
-    if pid:
-      solrQuery = "((id:" + pid + "))"
+      # supports retrieval of collection query via portal label, seriesId and PID
+      if (portalLabel is not None):
+        solrQuery = "(-obsoletedBy:* AND (label:" + portalLabel + ") OR (seriesId:" + portalLabel + ") OR (id:" + portalLabel + "))"
 
-    data = solrClientObject.getFieldValues('collectionQuery', q=solrQuery)
-    return data["collectionQuery"][0]
+      data = solrClientObject.getFieldValues('collectionQuery', q=solrQuery)
+      colelctionQuery = data["collectionQuery"][0]
+    except Exception as e:
+      colelctionQuery = None
+      _L.error(e)
+
+    return colelctionQuery
 
 
 def resolveCollectionQueryFromSolr(url = None, collectionQuery = "*:*"):
@@ -455,7 +457,7 @@ def resolveCollectionQueryFromSolr(url = None, collectionQuery = "*:*"):
     :param: url
     :param: collection query
 
-    :returns: 
+    :returns:
       resolved_collection_identifier: array object of the resolved collection identifiers
   """
   _L, t_0 = _getLogger()
