@@ -1478,43 +1478,6 @@ class MetricsReader:
         return(datasetIdentifierFamily, results[1])
 
 
-    def getCitationSourceMetadata(self, PIDs):
-        """
-        Queries SOLR to get CITED Target Dataset metadata
-        """
-
-        for i in range(len(PIDs)):
-            if PIDs[i].startswith("10.",0,3):
-                PIDs[i] = "doi:" + PIDs[i]
-                
-
-        query = 'identifier:("' + '" OR "'.join(PIDs) + '") AND formatType:METADATA&fl=id,origin,title,datePublished,dateUploaded,dateModified,&wt=json'
-        solr_query_url = self._config["solr_query_url"] + "?q=" + query
-        
-        # sending get request and saving the response as response object 
-        r = requests.get(url = solr_query_url) 
-        
-        # extracting data in json format 
-        if r.status_code == 200:
-            data = json.loads(r.text)
-            dataObject = {}
-            for i in data["response"]["docs"]:
-                dataObject[i["id"]] = {}
-                dataObject[i["id"]]["origin"] = i["origin"]
-                dataObject[i["id"]]["title"] = i["title"]
-                try:
-                    dataObject[i["id"]]["datePublished"] = i["datePublished"]
-                except KeyError as e:
-                    try:
-                        dataObject[i["id"]]["datePublished"] = i["dateUploaded"]
-                    except KeyError as e:
-                        pass
-
-            return dataObject
-        
-        return solr_query_url
-
-
     def formatElasticSearchResults(self, data, PIDList, start_date, end_date, aggregationType="month", objectType=None, requestMetadata={}):
         """
         Formats the ES response to the Metrics Service response
@@ -1746,9 +1709,17 @@ class MetricsReader:
                         targetSourceDict[i["source_id"]][k] = v
                 targetSourceDict[i["source_id"]]["citationMetadata"] = {}
 
-            for i in targetSourceDict:
-                targetSourceDict[i]["citationMetadata"] = self.getCitationSourceMetadata(
-                    targetSourceDict[i]["target_id"])
+            targetSourceDictPIDs = []
+            resolvedTargetSourceDict = {}
+            for source_id in targetSourceDict:
+                targetSourceDictPIDs.extend(targetSourceDict[source_id]["target_id"])
+
+            resolvedTargetSourceDict = pid_resolution.getResolvedTargetCitationMetadata(targetSourceDictPIDs)
+
+            for source_id in targetSourceDict:
+                for each_target in targetSourceDict[source_id]["target_id"]:
+                    targetSourceDict[source_id]["citationMetadata"][each_target] = {}
+                    targetSourceDict[source_id]["citationMetadata"][each_target] = resolvedTargetSourceDict[each_target]
             resultDetails["citations"] = targetSourceDict
 
         # append totals to the resultDetails object
@@ -1963,9 +1934,17 @@ class MetricsReader:
                         targetSourceDict[i["source_id"]][k] = v
                 targetSourceDict[i["source_id"]]["citationMetadata"] = {}
 
-            for i in targetSourceDict:
-                targetSourceDict[i]["citationMetadata"] = self.getCitationSourceMetadata(
-                    targetSourceDict[i]["target_id"])
+            targetSourceDictPIDs = []
+            resolvedTargetSourceDict = {}
+            for source_id in targetSourceDict:
+                targetSourceDictPIDs.extend(targetSourceDict[source_id]["target_id"])
+
+            resolvedTargetSourceDict = pid_resolution.getResolvedTargetCitationMetadata(targetSourceDictPIDs)
+
+            for source_id in targetSourceDict:
+                for each_target in targetSourceDict[source_id]["target_id"]:
+                    targetSourceDict[source_id]["citationMetadata"][each_target] = {}
+                    targetSourceDict[source_id]["citationMetadata"][each_target] = resolvedTargetSourceDict[each_target]
             resultDetails["citations"] = targetSourceDict
 
         # append totals to the resultDetails object
@@ -2180,9 +2159,17 @@ class MetricsReader:
                         targetSourceDict[i["source_id"]][k] = v
                 targetSourceDict[i["source_id"]]["citationMetadata"] = {}
 
-            for i in targetSourceDict:
-                targetSourceDict[i]["citationMetadata"] = self.getCitationSourceMetadata(
-                    targetSourceDict[i]["target_id"])
+            targetSourceDictPIDs = []
+            resolvedTargetSourceDict = {}
+            for source_id in targetSourceDict:
+                targetSourceDictPIDs.extend(targetSourceDict[source_id]["target_id"])
+
+            resolvedTargetSourceDict = pid_resolution.getResolvedTargetCitationMetadata(targetSourceDictPIDs)
+
+            for source_id in targetSourceDict:
+                for each_target in targetSourceDict[source_id]["target_id"]:
+                    targetSourceDict[source_id]["citationMetadata"][each_target] = {}
+                    targetSourceDict[source_id]["citationMetadata"][each_target] = resolvedTargetSourceDict[each_target]
             resultDetails["citations"] = targetSourceDict
 
         # append totals to the resultDetails object
