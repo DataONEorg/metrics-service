@@ -1319,11 +1319,25 @@ class MetricsReader:
         end_date = datetime.today().strftime('%m/%d/%Y')
 
         # update the date range if supplied in the query
-        if (len(self.response["metricsRequest"]["filterBy"]) > 1):
-            if (self.response["metricsRequest"]["filterBy"][1]["filterType"] == "month" and
+        if (len(self.response["metricsRequest"]["filterBy"]) > 0):
+            if ((self.response["metricsRequest"]["filterBy"][1]["filterType"] == "month" or
+                         self.response["metricsRequest"]["filterBy"][1]["filterType"] == "day" or
+                         self.response["metricsRequest"]["filterBy"][1]["filterType"] == "year") and
                         self.response["metricsRequest"]["filterBy"][1]["interpretAs"] == "range"):
                 start_date = self.response["metricsRequest"]["filterBy"][1]["values"][0]
                 end_date = self.response["metricsRequest"]["filterBy"][1]["values"][1]
+
+                # Get the aggregation Type
+                # default it to months
+                aggType = "month"
+                if (len(self.response["metricsRequest"]["groupBy"]) > 0):
+                    if "months" in self.response["metricsRequest"]["groupBy"]:
+                        aggType = "month"
+                    elif "days" in self.response["metricsRequest"]["groupBy"]:
+                        aggType = "day"
+                    elif "years" in self.response["metricsRequest"]["groupBy"]:
+                        aggType = "year"
+                self.logger.debug('aggType: %s', aggType)
 
         # Retrieving collection Query
         collectionQuery = pid_resolution.getPortalCollectionQueryFromSolr(url = None, portalLabel = portalLabel)
@@ -1382,10 +1396,10 @@ class MetricsReader:
                                 }
                             },
                             {
-                                "month": {
+                                aggType: {
                                     "date_histogram": {
                                         "field": "dateLogged",
-                                        "interval": "month"
+                                        "interval": aggType
                                     }
                                 }
                             }
@@ -1411,6 +1425,8 @@ class MetricsReader:
 
             t_es_start = time.time()
 
+            # Query the ES with the designed Search and Aggregation body
+            # uses the start_date and the end_date for the time range of data retrieval
             data = metrics_elastic_search.iterate_composite_aggregations(search_query=search_body,
                                                                          aggregation_query=aggregation_body,
                                                                          start_date=datetime.strptime(start_date,
@@ -1419,7 +1435,7 @@ class MetricsReader:
 
         requestMetadata = {}
         requestMetadata["collectionDetails"] = resultDetails
-        return (self.formatElasticSearchResults(data, pdif, start_date, end_date,"portal", requestMetadata))
+        return (self.formatElasticSearchResults(data, pdif, start_date, end_date,aggregationType=aggType, objectType="portal", requestMetadata=requestMetadata))
 
 
     def getPortalDatasetIdentifierFamily(self, portal_pids):
