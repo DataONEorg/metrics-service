@@ -543,9 +543,12 @@ def getResolvedTargetCitationMetadata(PIDs, solr_url=None, use_mm_params=True):
               'fl': (None, 'id,seriesId,origin,title,datePublished,dateUploaded,dateModified'),
               'rows': (None, 1000)
               }
-    query_string = "((id:*" + an_id.lower() + "*) OR (id:*" + an_id.upper() + \
-                            "*) OR (id:*" + an_id + "*) OR (seriesId:*" + an_id + \
-                            "*) OR (seriesId:*" + an_id.lower() + "*) OR (seriesId:*" + an_id.upper() + "*))"
+    query_string = "(((id:*" + an_id + "*) OR (id:*" + an_id.upper() + "*) OR (id:*" + an_id.lower() + \
+                        "*) OR (seriesId:*" + an_id + "*) OR (seriesId:*" + an_id.upper() + \
+                        "*) OR (seriesId:*" + an_id.lower() + "*) OR (resourceMap:*" + an_id + \
+                        "*) OR (resourceMap:*" + an_id.upper() + "*) OR (resourceMap:*" + an_id.lower() + \
+                        "*)) AND formatType:METADATA)"
+
     params['fq'] = (None, query_string)
 
     response = _doPost(session, url, params, use_mm=use_mm_params)
@@ -560,21 +563,26 @@ def getResolvedTargetCitationMetadata(PIDs, solr_url=None, use_mm_params=True):
 
         if "seriesId" in data["response"]["docs"][0]:
           result["metadata"]["seriesId"] = data["response"]["docs"][0]["seriesId"]
+        else:
+          result["metadata"]["seriesId"] = ""
 
         if "origin" in data["response"]["docs"][0]:
           result["metadata"]["origin"] = data["response"]["docs"][0]["origin"]
+        else:
+          result["metadata"]["origin"] = [""]
 
         if "title" in data["response"]["docs"][0]:
           result["metadata"]["title"] = data["response"]["docs"][0]["title"]
+        else:
+          result["metadata"]["title"] = ""
 
         if "datePublished" in data["response"]["docs"][0]:
           result["metadata"]["datePublished"] = data["response"]["docs"][0]["datePublished"]
+        elif "dateUploaded" in data["response"]["docs"][0]:
+          result["metadata"]["datePublished"] = data["response"]["docs"][0]["dateUploaded"]
+        elif "dateModified" in data["response"]["docs"][0]:
+          result["metadata"]["datePublished"] = data["response"]["docs"][0]["dateModified"]
 
-        if "dateUploaded" in data["response"]["docs"][0]:
-          result["metadata"]["dateUploaded"] = data["response"]["docs"][0]["dateUploaded"]
-
-        if "dateModified" in data["response"]["docs"][0]:
-          result["metadata"]["dateModified"] = data["response"]["docs"][0]["dateModified"]
     return result
 
   async def _work(pids):

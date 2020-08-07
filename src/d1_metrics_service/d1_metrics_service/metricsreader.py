@@ -76,10 +76,10 @@ class MetricsReader:
         else:
             resp.body = json.dumps(metrics_request, ensure_ascii=False)
 
+        resp.status = falcon.HTTP_200
         if "status_code" in metrics_response["resultDetails"]:
             resp.status = metrics_response["resultDetails"]["status_code"]
-        else:
-            resp.status = falcon.HTTP_200
+
         resp.set_headers({"Expires": expiry_time.strftime("%a, %d %b %Y %H:%M:%S GMT")})
         self.logger.debug("exit on_get")
 
@@ -98,10 +98,9 @@ class MetricsReader:
         metrics_response = self.process_request(metrics_request)
         resp.body = json.dumps(metrics_response, ensure_ascii=False)
 
+        resp.status = falcon.HTTP_200
         if "status_code" in metrics_response["resultDetails"]:
             resp.status = metrics_response["resultDetails"]["status_code"]
-        else:
-            resp.status = falcon.HTTP_200
 
         self.logger.debug("exit on_post")
 
@@ -1735,8 +1734,12 @@ class MetricsReader:
 
             for source_id in targetSourceDict:
                 for each_target in targetSourceDict[source_id]["target_id"]:
-                    targetSourceDict[source_id]["citationMetadata"][each_target] = {}
-                    targetSourceDict[source_id]["citationMetadata"][each_target] = resolvedTargetSourceDict[each_target]
+                    if each_target.startswith("10.", 0, 3):
+                        each_target_pid = "doi:" + each_target
+                    else:
+                        each_target_pid = each_target
+                    targetSourceDict[source_id]["citationMetadata"][each_target_pid] = {}
+                    targetSourceDict[source_id]["citationMetadata"][each_target_pid] = resolvedTargetSourceDict[each_target]
             resultDetails["citations"] = targetSourceDict
 
         # append totals to the resultDetails object
@@ -1960,8 +1963,12 @@ class MetricsReader:
 
             for source_id in targetSourceDict:
                 for each_target in targetSourceDict[source_id]["target_id"]:
-                    targetSourceDict[source_id]["citationMetadata"][each_target] = {}
-                    targetSourceDict[source_id]["citationMetadata"][each_target] = resolvedTargetSourceDict[each_target]
+                    if each_target.startswith("10.", 0, 3):
+                        each_target_pid = "doi:" + each_target
+                    else:
+                        each_target_pid = each_target
+                    targetSourceDict[source_id]["citationMetadata"][each_target_pid] = {}
+                    targetSourceDict[source_id]["citationMetadata"][each_target_pid] = resolvedTargetSourceDict[each_target]
             resultDetails["citations"] = targetSourceDict
 
         # append totals to the resultDetails object
@@ -2185,8 +2192,12 @@ class MetricsReader:
 
             for source_id in targetSourceDict:
                 for each_target in targetSourceDict[source_id]["target_id"]:
-                    targetSourceDict[source_id]["citationMetadata"][each_target] = {}
-                    targetSourceDict[source_id]["citationMetadata"][each_target] = resolvedTargetSourceDict[each_target]
+                    if each_target.startswith("10.", 0, 3):
+                        each_target_pid = "doi:" + each_target
+                    else:
+                        each_target_pid = each_target
+                    targetSourceDict[source_id]["citationMetadata"][each_target_pid] = {}
+                    targetSourceDict[source_id]["citationMetadata"][each_target_pid] = resolvedTargetSourceDict[each_target]
             resultDetails["citations"] = targetSourceDict
 
         # append totals to the resultDetails object
