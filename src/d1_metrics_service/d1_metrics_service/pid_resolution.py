@@ -418,7 +418,7 @@ def getResolvePIDs(PIDs, solr_url=None, use_mm_params=True):
 #####################################
 
 
-def getPortalCollectionQueryFromSolr(url = None, portalLabel = None, pid = None, seriesId = None):
+def getPortalCollectionQueryFromSolr(url = None, portalLabel = None):
     """
       Returns the collection query for the portal
       :param: url
@@ -426,27 +426,29 @@ def getPortalCollectionQueryFromSolr(url = None, portalLabel = None, pid = None,
       :param: pid
       :param: seriesId
 
-      :returns: 
+      :returns:
         CollectionQuery string retrieved from SOLR
     """
-    if url is None:
-      url = "https://cn.dataone.org/cn/v2/query"
+    _L, t_0 = _getLogger()
+    try:
+      if url is None:
+        url = "https://cn.dataone.org/cn/v2/query"
 
-    # Create a solr client object
-    solrClientObject = SolrClient(url, "solr")
-    solrQuery = "*:*"
+      # Create a solr client object
+      solrClientObject = SolrClient(url, "solr")
+      solrQuery = "*:*"
 
-    # supports retrieval of collection query via portal label, seriesId and PID
-    if (portalLabel is not None) or (seriesId is not None): 
-      if portalLabel:
-        solrQuery = "(-obsoletedBy:* AND (label:" + portalLabel + "))"
-      if seriesId:
-        solrQuery = "(-obsoletedBy:* AND (seriesId:" + seriesId + "))"
-    if pid:
-      solrQuery = "((id:" + pid + "))"
+      # supports retrieval of collection query via portal label, seriesId and PID
+      if (portalLabel is not None):
+        solrQuery = "(-obsoletedBy:* AND (label:" + portalLabel + ") OR (seriesId:" + portalLabel + ") OR (id:" + portalLabel + "))"
 
-    data = solrClientObject.getFieldValues('collectionQuery', q=solrQuery)
-    return data["collectionQuery"][0]
+      data = solrClientObject.getFieldValues('collectionQuery', q=solrQuery)
+      colelctionQuery = data["collectionQuery"][0]
+    except Exception as e:
+      colelctionQuery = None
+      _L.error(e)
+
+    return colelctionQuery
 
 
 def resolveCollectionQueryFromSolr(url = None, collectionQuery = "*:*"):
@@ -455,7 +457,7 @@ def resolveCollectionQueryFromSolr(url = None, collectionQuery = "*:*"):
     :param: url
     :param: collection query
 
-    :returns: 
+    :returns:
       resolved_collection_identifier: array object of the resolved collection identifiers
   """
   _L, t_0 = _getLogger()
@@ -480,6 +482,135 @@ def resolveCollectionQueryFromSolr(url = None, collectionQuery = "*:*"):
     _L.error("Error in fetching collection PIDs")
 
   return resolved_collection_identifier
+
+
+def getResolvedTargetCitationMetadata(PIDs, solr_url=None, use_mm_params=True):
+  '''
+  Resolves the Citaion metadata for target identifier
+
+  input: ["urn:uuid:f46dafac-91e4-4f5f-aaff-b53eab9fe863", ]
+  output: {"10.5063/F1K935SB": {
+                        "id": "doi:10.5063/F1K935SB",
+                        "origin": [
+                            "Meagan Krupa",
+                            "Molly Cunfer",
+                            "Jeanette Clark"
+                        ],
+                        "title": "Alaska Board of Fisheries Proposals 1959-2016",
+                        "datePublished": "2017-10-19T00:00:00Z",
+                        "dateUploaded": "2018-11-05T22:46:28.946Z",
+                        "dateModified": "2018-11-05T22:46:32.04Z"
+                    },
+          }
+  Args:
+    PIDs:
+    solr_url:
+
+  Returns:
+  '''
+
+  def _doPost(session, url, params, use_mm=True):
+    """
+    Post a request, using mime-multipart or not. This is necessary because
+    calling solr on the local address on the CN bypasses the CN service interface which
+    uses mime-multipart requests.
+
+    Args:
+      session: Session instance
+      url: URL for request
+      params: params configure for mime-multipart request
+      use_mm: if not true, then a form request is made.
+
+    Returns: response object
+    """
+    if use_mm:
+      return session.post(url, files=params)
+    paramsd = {key: value[1] for (key, value) in params.items()}
+    # This is necessary because the default query is set by the DataONE SOLR connector
+    # which is used when accessing solr through the public interface.
+    if not 'q' in paramsd:
+      paramsd['q'] = "*:*"
+    return session.post(url, data=paramsd)
+
+  def _fetch(url, an_id):
+    session = requests.Session()
+    result = {}
+    # always return at least this identifier
+    result["id"] = an_id
+    result["metadata"] = {}
+
+    params = {'wt': (None, 'json'),
+              'fl': (None, 'id,seriesId,origin,title,datePublished,dateUploaded,dateModified'),
+              'rows': (None, 1000)
+              }
+    query_string = "(((id:*" + an_id + "*) OR (id:*" + an_id.upper() + "*) OR (id:*" + an_id.lower() + \
+                        "*) OR (seriesId:*" + an_id + "*) OR (seriesId:*" + an_id.upper() + \
+                        "*) OR (seriesId:*" + an_id.lower() + "*) OR (resourceMap:*" + an_id + \
+                        "*) OR (resourceMap:*" + an_id.upper() + "*) OR (resourceMap:*" + an_id.lower() + \
+                        "*)) AND formatType:METADATA)"
+
+    params['fq'] = (None, query_string)
+
+    response = _doPost(session, url, params, use_mm=use_mm_params)
+    if response.status_code == requests.codes.ok:
+      # continue
+      logging.debug(response.text)
+      data = json.loads(response.text)
+      if data["response"]["numFound"] > 0:
+
+        if "id" in data["response"]["docs"][0]:
+          result["metadata"]["id"] = data["response"]["docs"][0]["id"]
+
+        if "seriesId" in data["response"]["docs"][0]:
+          result["metadata"]["seriesId"] = data["response"]["docs"][0]["seriesId"]
+        else:
+          result["metadata"]["seriesId"] = ""
+
+        if "origin" in data["response"]["docs"][0]:
+          result["metadata"]["origin"] = data["response"]["docs"][0]["origin"]
+        else:
+          result["metadata"]["origin"] = [""]
+
+        if "title" in data["response"]["docs"][0]:
+          result["metadata"]["title"] = data["response"]["docs"][0]["title"]
+        else:
+          result["metadata"]["title"] = ""
+
+        if "datePublished" in data["response"]["docs"][0]:
+          result["metadata"]["datePublished"] = data["response"]["docs"][0]["datePublished"]
+        elif "dateUploaded" in data["response"]["docs"][0]:
+          result["metadata"]["datePublished"] = data["response"]["docs"][0]["dateUploaded"]
+        elif "dateModified" in data["response"]["docs"][0]:
+          result["metadata"]["datePublished"] = data["response"]["docs"][0]["dateModified"]
+
+    return result
+
+  async def _work(pids):
+    with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as executor:
+      loop = asyncio.get_event_loop()
+      tasks = []
+      for an_id in pids:
+        url = _defaults(solr_url)  # call here as option for RR select
+        tasks.append(loop.run_in_executor(executor, _fetch, url, an_id))
+      for response in await asyncio.gather(*tasks):
+        results[response["id"]] = response["metadata"]
+
+  _L, t_0 = _getLogger()
+  results = {}
+  _L.debug("Enter")
+  # In a multithreading environment such as under gunicorn, the new thread created by
+  # gevent may not provide an event loop. Create a new one if necessary.
+  try:
+    loop = asyncio.get_event_loop()
+  except RuntimeError as e:
+    _L.info("Creating new event loop.")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+  future = asyncio.ensure_future(_work(PIDs))
+  loop.run_until_complete(future)
+  _L.debug("elapsed:%fsec", time.time() - t_0)
+  return results
 
 
 def string_escape(s, encoding='utf-8'):
