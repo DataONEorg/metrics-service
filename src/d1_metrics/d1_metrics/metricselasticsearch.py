@@ -7,6 +7,7 @@ from elasticsearch import Elasticsearch
 from elasticsearch import helpers
 import requests
 import json
+import time
 import datetime
 from dateutil import parser as dateparser
 from dateutil.tz import tzutc
@@ -14,13 +15,20 @@ from pytz import timezone
 import json
 import pprint
 
+import concurrent.futures
+import asyncio
+from aiohttp import ClientSession
+
 CONFIG_ELASTIC_SECTION = "elasticsearch"
 DEFAULT_ELASTIC_CONFIG = {
   "host":"localhost",
   "port":9200,
   "index":"eventlog-1",
-  "request_timeout":30,
+  "request_timeout":300,
   }
+CONCURRENT_REQUESTS = 20  #max number of concurrent requests to run
+BATCH_SIZE = 30000
+
 
 class MetricsElasticSearch(object):
   '''
@@ -273,7 +281,7 @@ class MetricsElasticSearch(object):
     :param limit:
     :return: Returns ES Query results
     """
-    self._L.info("Executing: %s", json.dumps(search_body, indent=2))
+    self._L.info("Executing: %s", json.dumps(search_body))
     results = self._scan(query=search_body, index=index)
     counter = 0
     total_hits = 0
@@ -1000,7 +1008,8 @@ class MetricsElasticSearch(object):
       search_body["aggs"]["pid_list"]["composite"]["after"] = {}
       search_body["aggs"]["pid_list"]["composite"]["after"] = after_record
     self._L.debug("Request: %s", str(search_body))
-    resp = self._es.search(body=search_body, request_timeout=None)
+
+    resp = self._es.search(body=search_body, request_timeout=self._config["request_timeout"])
     return(resp)
 
 
@@ -1044,6 +1053,69 @@ class MetricsElasticSearch(object):
     search_body["_source"] = ["PID", "datasetIdentifierFamily"]
     search_body["query"] = search_query
     return self._getQueryResults(index, search_body, max_limit)
+
+
+  def async_iterate_composite_aggregations(self, pdif, start_date, end_date, search_query = None, aggregation_query = None):
+    """
+
+    """
+
+    def _fetch(self, start_date, end_date, search_query, aggregation_query):
+
+      aggregations = {}
+      count = 0
+      total = 0
+      size = 100
+
+      if (count == total == 0):
+        aggregations = self.get_aggregations(query=search_query, aggQuery=aggregation_query, date_start=start_date,
+                                             date_end=end_date)
+        count = count + size
+        total = aggregations["hits"]["total"]
+      while (count < total):
+        after = aggregations["aggregations"]["pid_list"]["buckets"][-1]
+        temp = self.get_aggregations(query=search_query, aggQuery=aggregation_query, date_start=start_date,
+                                     date_end=end_date, after_record=after["key"])
+        if (len(temp["aggregations"]["pid_list"]["buckets"]) == 0):
+          break
+        aggregations["aggregations"]["pid_list"]["buckets"] = aggregations["aggregations"]["pid_list"]["buckets"] \
+                                                              + temp["aggregations"]["pid_list"]["buckets"]
+        count = count + size
+      return aggregations
+
+    async def _work(self, pdif, start_date, end_date, search_query, aggregation_query):
+      with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as executor:
+        loop = asyncio.get_event_loop()
+        tasks = []
+
+        for num in range(0, len(pdif), batch_size):
+          self._L.info("retrieving async batch : " + str(num) + " and " + str(num + batch_size))
+          batch_portal_pids = pdif[num: num + batch_size]
+          num += batch_size
+          search_query[1]["terms"]["pid.key"] = batch_portal_pids
+          tasks.append(loop.run_in_executor(executor, _fetch, self, start_date, end_date, search_query, aggregation_query))
+
+        for response in await asyncio.gather(*tasks):
+          aggregation_results.update(response)
+
+    self._L.info("Entering iterate async aggregation")
+    t_0 = time.time()
+    aggregation_results = {}
+    batch_size = BATCH_SIZE
+    # In a multithreading environment such as under gunicorn, the new thread created by
+    # gevent may not provide an event loop. Create a new one if necessary.
+    try:
+      loop = asyncio.get_event_loop()
+    except RuntimeError as e:
+      self._L.info("Creating new event loop.")
+      loop = asyncio.new_event_loop()
+      asyncio.set_event_loop(loop)
+
+    future = asyncio.ensure_future(_work(self, pdif, start_date, end_date, search_query, aggregation_query))
+    loop.run_until_complete(future)
+    self._L.debug("elapsed:%fsec", time.time() - t_0)
+
+    return aggregation_results
 
 
 # if __name__ == "__main__":
