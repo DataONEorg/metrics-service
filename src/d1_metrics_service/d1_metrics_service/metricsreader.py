@@ -77,8 +77,9 @@ class MetricsReader:
             resp.body = json.dumps(metrics_request, ensure_ascii=False)
 
         resp.status = falcon.HTTP_200
-        if "status_code" in metrics_response["resultDetails"]:
-            resp.status = metrics_response["resultDetails"]["status_code"]
+        if (self.response is not None) and ("resultDetails" in self.response and ("status_code" in self.response["resultDetails"])):
+            resp.status = self.response["resultDetails"]["status_code"]
+
 
         resp.set_headers({"Expires": expiry_time.strftime("%a, %d %b %Y %H:%M:%S GMT")})
         self.logger.debug("exit on_get")
@@ -99,8 +100,8 @@ class MetricsReader:
         resp.body = json.dumps(metrics_response, ensure_ascii=False)
 
         resp.status = falcon.HTTP_200
-        if "status_code" in metrics_response["resultDetails"]:
-            resp.status = metrics_response["resultDetails"]["status_code"]
+        if (self.response is not None) and ("resultDetails" in self.response and ("status_code" in self.response["resultDetails"])):
+            resp.status = self.response["resultDetails"]["status_code"]
 
         self.logger.debug("exit on_post")
 
@@ -1303,6 +1304,7 @@ class MetricsReader:
                 Metrics Service response for the Metrics filter type 'portal'
 
         """
+        self.logger.info("Performing batch processing...")
         # Setting the query for the user profile
         metrics_elastic_search = MetricsElasticSearch()
         metrics_elastic_search.connect()
@@ -1363,17 +1365,28 @@ class MetricsReader:
         resultDetails["collection_query_time"] = time.time() - t_start
 
         t_portal_pids = time.time()
-        
+
         # Getting portal PIDs from Collection Query
-        portal_pids = pid_resolution.resolveCollectionQueryFromSolr(url = None, collectionQuery = collectionQuery)
-        
+        portal_pids = pid_resolution.resolveCollectionQueryFromSolr(url=None, collectionQuery=collectionQuery)
+
         resultDetails["portal_pids_size"] = len(portal_pids)
+        self.logger.info("Fetched Portal collection pids, size: " + str(len(portal_pids)))
 
         t_portal_dataset_identifier_family = time.time()
-        pdif, resultDetails["es_result_size"] = self.getPortalDatasetIdentifierFamily(portal_pids)
+        try:
+            # pdif, resultDetails["es_result_size"] = self.getPortalDatasetIdentifierFamilyInBatches(portal_pids)
+            pdif, resultDetails["es_result_size"] = pid_resolution.getAsyncPortalDatasetIdentifierFamilyByBatches(
+                                                                                                        portal_pids)
+            self.logger.info("PDIF fetched successfully: " + str(resultDetails["es_result_size"]))
+        except Exception as e:
+            pdif, resultDetails["es_result_size"] = portal_pids, len(portal_pids)
+            self.logger.info("Exception occured while fetching pdif: " + str(e))
 
         data = {}
+        batch_size = 30000
+
         if includeDownloads or includeViews:
+
             # Search body for Portal Metrics
             search_body = [
                 {
@@ -1381,20 +1394,12 @@ class MetricsReader:
                 },
                 {
                     "terms": {
-                        "pid.key": pdif
+                        "pid.key": []
                     }
                 },
                 {
                     "exists": {
                         "field": "sessionId"
-                    }
-                },
-                {
-                    "terms": {
-                        "formatType": [
-                            "DATA",
-                            "METADATA"
-                        ]
                     }
                 }
             ]
@@ -1425,7 +1430,7 @@ class MetricsReader:
             }
 
             # if the aggregation is requested by country, add country object to groupBy
-            if ("country" in self.response["metricsRequest"]["groupBy"]) :
+            if ("country" in self.response["metricsRequest"]["groupBy"]):
                 countryObject = {
                     "country": {
                         "terms": {
@@ -1437,61 +1442,25 @@ class MetricsReader:
                 aggregation_body["pid_list"]["composite"]["sources"].append(countryObject)
 
             t_delta = time.time() - t_start
-            self.logger.debug('getMetricsPerPortal:t2=%.4f', t_delta)
+            self.logger.info('getAsyncMetricsPerPortalByBatch:t2=%.4f', t_delta)
 
             t_es_start = time.time()
 
             # Query the ES with the designed Search and Aggregation body
             # uses the start_date and the end_date for the time range of data retrieval
-            data = metrics_elastic_search.iterate_composite_aggregations(search_query=search_body,
-                                                                         aggregation_query=aggregation_body,
-                                                                         start_date=datetime.strptime(start_date,
-                                                                                                      '%m/%d/%Y'),
-                                                                         end_date=datetime.strptime(end_date, '%m/%d/%Y'))
+            data = metrics_elastic_search.async_iterate_composite_aggregations(pdif=pdif, search_query=search_body,
+                                                                               aggregation_query=aggregation_body,
+                                                                               start_date=datetime.strptime(start_date,
+                                                                                                            '%m/%d/%Y'),
+                                                                               end_date=datetime.strptime(end_date,
+                                                                                                          '%m/%d/%Y'))
 
         requestMetadata = {}
         requestMetadata["collectionDetails"] = resultDetails
-        return (self.formatElasticSearchResults(data, pdif, start_date, end_date,aggregationType=aggType, objectType="portal", requestMetadata=requestMetadata))
-
-
-    def getPortalDatasetIdentifierFamily(self, portal_pids):
-        """
-            Gets the dataset identifier family for PIDs that belong to a specific potal
-
-            :param: portal_pids Array object of dataset identifiers for a given portal
-            :returns:
-                Array of aggregated dataset identifier family for the datasets belonging to a portal
-        """
-        # Basic init for required objects
-        t_start = time.time()
-        metrics_elastic_search = MetricsElasticSearch()
-        metrics_elastic_search.connect()
-
-        t_delta = time.time() - t_start
-        self.logger.debug('getPortalDatasetIdentifierFamily:t1=%.4f', t_delta)
-        datasetIdentifierFamily = []
-
-        search_query = {
-            "bool": {
-                "must": [
-                    {
-                        "terms": {
-                            "PID.keyword": portal_pids
-                        }
-                    }
-                ]
-            }
-        }
-
-        # Try searching the identifiers index for the datasetIdentifierFamily
-        results = metrics_elastic_search.getDatasetIdentifierFamily(search_query = search_query, index = "identifiers-2",  max_limit=10000)
-        breakAt = 0
-        
-        for i in results[0]:
-            for identifier in i["datasetIdentifierFamily"]:
-                datasetIdentifierFamily.append(identifier)
-        
-        return(datasetIdentifierFamily, results[1])
+        return (
+            self.formatElasticSearchResults(data, pdif, start_date, end_date, aggregationType=aggType,
+                                            objectType="portal",
+                                            requestMetadata=requestMetadata))
 
 
     def formatElasticSearchResults(self, data, PIDList, start_date, end_date, aggregationType="month", objectType=None, requestMetadata={}):
