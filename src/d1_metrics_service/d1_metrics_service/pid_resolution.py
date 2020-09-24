@@ -12,12 +12,14 @@ import json
 import asyncio
 from aiohttp import ClientSession
 from d1_metrics.solrclient import SolrClient
+from d1_metrics.metricselasticsearch import MetricsElasticSearch
 import concurrent.futures
 
 
 PRODUCTION_SOLR = "https://cn.dataone.org/cn/v2/query/solr/"
 DEFAULT_SOLR = PRODUCTION_SOLR
 CONCURRENT_REQUESTS = 20  #max number of concurrent requests to run
+BATCH_SIZE = 30000
 
 # List of characters that should be escaped in solr query terms
 SOLR_RESERVED_CHAR_LIST = [
@@ -611,6 +613,79 @@ def getResolvedTargetCitationMetadata(PIDs, solr_url=None, use_mm_params=True):
   loop.run_until_complete(future)
   _L.debug("elapsed:%fsec", time.time() - t_0)
   return results
+
+
+def getAsyncPortalDatasetIdentifierFamilyByBatches(portal_pids):
+  """
+  Resolving Portal Dataset Identifier Family asynchronously
+  """
+  # Basic init for required objects
+  _L, t_0 = _getLogger()
+  metrics_elastic_search = MetricsElasticSearch()
+  metrics_elastic_search.connect()
+
+  t_delta = time.time() - t_0
+  _L.debug('getAsyncPortalDatasetIdentifierFamily:t1=%.4f', t_delta)
+  batch_size = BATCH_SIZE
+  datasetIdentifierFamily = []
+  totalDatasetIdentifierFamilySize = 0
+
+  def _fetch(batch_portal_pids):
+
+    results = {}
+    search_query = {
+      "bool": {
+        "must": [
+          {
+            "terms": {
+              "PID.keyword": batch_portal_pids
+            }
+          }
+        ]
+      }
+    }
+    # Try searching the identifiers index for the datasetIdentifierFamily
+    results = metrics_elastic_search.getDatasetIdentifierFamily(search_query=search_query, index="identifiers-2", max_limit=1000000)
+
+    return results
+
+  async def _work(portal_pids):
+    with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as executor:
+      loop = asyncio.get_event_loop()
+      tasks = []
+
+      for num in range(0, len(portal_pids), batch_size):
+        _L.info("retrieving batch : " + str(num) + " and " + str(num + batch_size))
+        batch_portal_pids = portal_pids[num: num + batch_size]
+        num += batch_size
+        tasks.append(loop.run_in_executor(executor, _fetch, batch_portal_pids))
+
+      for response in await asyncio.gather(*tasks):
+        datasetIdentifierFamily_results.append(response)
+        for i in response[0]:
+          for identifier in i["datasetIdentifierFamily"]:
+            datasetIdentifierFamily.append(identifier)
+
+
+  _L.debug("Enter")
+  datasetIdentifierFamily_results = []
+  # In a multithreading environment such as under gunicorn, the new thread created by
+  # gevent may not provide an event loop. Create a new one if necessary.
+  try:
+    loop = asyncio.get_event_loop()
+  except RuntimeError as e:
+    _L.info("Creating new event loop.")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+  future = asyncio.ensure_future(_work(portal_pids))
+  loop.run_until_complete(future)
+  _L.debug("elapsed:%fsec", time.time() - t_0)
+
+  for response in datasetIdentifierFamily_results:
+    totalDatasetIdentifierFamilySize += response[1]
+
+  return (datasetIdentifierFamily, totalDatasetIdentifierFamilySize)
 
 
 def string_escape(s, encoding='utf-8'):
