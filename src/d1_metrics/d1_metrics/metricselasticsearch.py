@@ -358,6 +358,66 @@ class MetricsElasticSearch(object):
     return self._getQueryResults(index, search_body, limit)
 
 
+  def getRawSearches(self,
+                  index=None,
+                  q=None,
+                  session_id=None,
+                  limit=10,
+                  date_start=None,
+                  date_end=None,
+                  fields=None):
+    """
+    Performs a search Query on the ES index. Based on the parametrs passes, it sets the search body and returns the
+    result to the calling function.
+    :param index:
+    :param q:
+    :param session_id:
+    :param limit:
+    :param date_start:
+    :param date_end:
+    :param fields:
+    :return: Dictionary of results from the ES. Results are aggregated and includes complete paginated responses.
+    """
+    if index is None:
+      index = self.indexname
+
+
+
+    # Set up a raw search query
+    search_body = {
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "term": {"beat.name": self._beatname}
+            },
+          ],
+          "must_not": [
+
+          ]
+        }
+      }
+    }
+
+    if q is None:
+      q = {
+        "query_string": {
+          "default_field": "message",
+          "query": "\/cn\/v2\/query\/solr\/",
+        }
+      }
+    search_body["query"]["bool"]["must"].append( q )
+
+    try:
+      results = self._es.search(index=index, body=search_body, limit=limit)
+      if results["hits"]["hits"] is None:
+        raise ValueError("No hits in result.")
+      return results
+    except Exception as e:
+      self._L.error(e)
+    return None
+
+
   def getSessions(self,
                   index=None,
                   event_type=None,
