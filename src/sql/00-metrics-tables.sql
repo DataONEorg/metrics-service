@@ -63,6 +63,17 @@ create table citations (
     primary key(target_id)
 );
 
+
+/*
+ * Portal metadata table
+ */
+ create table portal_metadata (
+    id SERIAL,                    -- identifier of the record. (not null)
+    series_id TEXT NOT NULL,      -- series identifier
+    hash TEXT,                    -- portal collection hash
+    primary key(series_id)
+);
+
 /*
  * db_metadata -- table to store arbitrary key, value pairs for application state and configuration
  */
