@@ -18,9 +18,9 @@ import datetime
 import requests
 import concurrent.futures
 
-
 from d1_metrics import common
 from d1_metrics.solrclient import SolrClient
+from d1_metrics.metricsdatabase import MetricsDatabase
 from d1_metrics.metricselasticsearch import MetricsElasticSearch
 
 from d1_metrics_service import pid_resolution
@@ -44,24 +44,54 @@ BATCH_TDELTA_PERIOD = datetime.timedelta(minutes=10)
 # ==========
 
 
+def getESSyncLogger(level=logging.DEBUG, name=None):
+    """
+    Returns the logging object
+    :param level:
+    :param name:
+    :return:
+    """
+    logger = logging.getLogger(name)
+    for handler in logger.handlers:
+        logger.removeHandler(handler)
+
+    logger = logging.getLogger("es_eventlog_sync")
+    logger.setLevel(level)
+    f_handler = logging.FileHandler('./es_eventlog.log')
+    f_handler.setLevel(level)
+    f_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    f_handler.setFormatter(f_formatter)
+    logger.addHandler(f_handler)
+    return logger
+
+
 def getModifiedPortals():
     """
-    Queries Solr to get the list of portals that were modified
+    Returns list of portals that were modified since last check
     :return:
     """
-    pass
-
-
-def querySolr():
-    """
-    Queries Solr end point
-    :return:
-    """
-
     pass
 
 
 def performRegularPortalChecks():
+    """
+    Queries Solr to get the list of portals that were modified
+    Initiates the index update procedures for modified portals
+    :return:
+    """
+    logger = getESSyncLogger(name="es_eventlog_sync")
+    # TODO : replace with solr to get the list of portals that needs update
+    test_fixture = testSetUP()
+    logger.info("Fixture set up complete")
+
+    logger.info("Beginning handle Portal Job")
+    for key in test_fixture["portalIdentifiers"]:
+        logger.info("Performing job for seriesId: " + test_fixture["portalIdentifiers"][key])
+        handlePortalJob(test_fixture["portalIdentifiers"][key])
+    return
+
+
+def performRegularPortalCollectionQueryChecks():
     """
     Checks for newly added datasets that satisfy the collection query
     associated with this portal
@@ -70,82 +100,95 @@ def performRegularPortalChecks():
     pass
 
 
-def _doPost(session, url, params, use_mm=True):
+def querySolr(url="https://cn.dataone.org/cn/v2/query/solr/?", query_string="*:*", wt="json", rows="1", fl=''):
     """
-    Post a request, using mime-multipart or not. This is necessary because
-    calling solr on the local address on the CN bypasses the CN service interface which
-    uses mime-multipart requests.
 
-    Args:
-    session: Session instance
-    url: URL for request
-    params: params configure for mime-multipart request
-    use_mm: if not true, then a form request is made.
-
-    Returns: response object
+    :param url:
+    :param wt:
+    :param rows:
+    :return:
     """
-    if use_mm:
-        return session.post(url, files=params)
-    paramsd = {key: value[1] for (key, value) in params.items()}
-    # This is necessary because the default query is set by the DataONE SOLR connector
-    # which is used when accessing solr through the public interface.
-    if not 'q' in paramsd:
-        paramsd['q'] = "*:*"
-    return session.post(url, data=paramsd)
+    logger = getESSyncLogger(name="es_eventlog_sync")
+    if url is None:
+        url = "https://cn.dataone.org/cn/v2/query/solr/?"
+
+    query = "q=" + query_string + "&fl=" + fl + "&wt=" + wt + "&rows=" + rows
+
+    try:
+        response = requests.get(url=url + query)
+
+        if response.status_code == 200:
+            return response.json()
+        else:
+            raise Exception("Error while wuerying solr. Service received Non OK status code")
+    except Exception as e:
+        logger.error(msg=e)
+        return None
 
 
-def getPortalMetadata(url=None, seriesId=""):
+def getPortalMetadata(seriesId="", fl="seriesId,collectionQuery"):
     """
     Retrieves portal attributes from solr
     :return:
     """
-    if url is None:
-        url = "https://cn.dataone.org/cn/v2/query"
 
-    session = requests.Session()
-
-    # Create a solr client object
-    solrClientObject = SolrClient(url, "solr")
+    logger = getESSyncLogger(name="es_eventlog_sync")
+    query_string = '(seriesId:"' + seriesId + '" AND -obsoletedBy:* AND formatType:METADATA)'
     portal_metadata = {}
 
-    params = {'wt': (None, 'json'),
-              'fl': (None, 'seriesId,collectionQuery'),
-              'rows': (None, 1)
-              }
-
-    query_string = "(((seriesId:*" + seriesId + "*) OR (seriesId:*" + seriesId.upper() + \
-                   "*) OR (seriesId:*" + seriesId.lower() + "*)) AND -obsoletedBy:* AND formatType:METADATA)"
-
-    params['fq'] = (None, query_string)
-
     try:
-        solr_response = _doPost(session, url, params)
+        solr_response = querySolr(query_string=query_string, fl=fl)
 
-        if solr_response["numFound"] > 0:
-            portal_metadata["seriesId"] = solr_response["docs"][0]["seriesId"]
-            portal_metadata["seriesId"] = solr_response["docs"][0]["seriesId"]
-            print(portal_metadata)
+        if solr_response["response"]["numFound"] > 0:
+            portal_metadata["seriesId"] = solr_response["response"]["docs"][0]["seriesId"]
+            portal_metadata["collectionQuery"] = solr_response["response"]["docs"][0]["collectionQuery"]
+
+            # Getting all the pids related to the portal
+            portal_metadata["collectionQuery"] = portal_metadata["collectionQuery"].replace('-obsoletedBy:* AND ', '')
+            return portal_metadata
 
     except Exception as e:
-        print(e)
-    pass
+        logger.error(msg=e)
+        return {}
 
 
 
-def resolvePortalCollectionQuery():
+def handlePortalJob(seriesId=""):
     """
-
+    High level function that handles the entire process of keeping ES index upto date for a given portal
+    :param seriesId:
     :return:
     """
-    pass
+
+    logger = getESSyncLogger(name="es_eventlog_sync")
+    # Initializing the lists
+    portal_collection_PIDs = []
+    portal_DIF = []
+    total_portal_DIF_count = 0
+
+    logger.info(seriesId)
+
+    portal_metadata = getPortalMetadata(seriesId=seriesId)
+
+    logger.info(portal_metadata)
+
+    # resolving collection query and getting the PIDs from identifiers index
+    portal_collection_PIDs = pid_resolution.resolveCollectionQueryFromSolr(collectionQuery=portal_metadata["collectionQuery"])
+    logger.info(len(portal_collection_PIDs))
+    portal_DIF, total_portal_DIF_count = pid_resolution.getAsyncPortalDatasetIdentifierFamilyByBatches(portal_collection_PIDs)
+
+    logger.info("count = " + str(total_portal_DIF_count))
+
+    # generate hash
+    portal_metadata["hash"] = generatePortalHash(portal_DIF)
+    logger.info("hash = " + str(portal_metadata["hash"]))
+
+    # check in the DB
+
+    # update if required; else continue
 
 
-def retrievePortalDatasetIdentifierFamily():
-    """
-
-    :return:
-    """
-    pass
+    return
 
 
 def generatePortalHash(portalDatasetIdentifierFamily=[]):
@@ -153,7 +196,9 @@ def generatePortalHash(portalDatasetIdentifierFamily=[]):
     Generates hash for a given Portal from list of identifiers
     :return:
     """
-    portalDatasetIdentifierFamily.sort()
+    logger = getESSyncLogger(name="es_eventlog_sync")
+    logger.info("Generating portal collection hash")
+    portalDatasetIdentifierFamily.sort(key = str)
     return hash(tuple(portalDatasetIdentifierFamily))
 
 
@@ -164,6 +209,28 @@ def storePortalHash():
     """
     pass
 
+
+def retrievePortalHash(seriesId="", metrics_database=None):
+    """
+
+    :param seriesId:
+    :return:
+    """
+    logger = getESSyncLogger(name="es_eventlog_sync")
+    logger.info("Beginning hash retrieval job")
+    if metrics_database is None:
+        metrics_database = MetricsDatabase()
+        metrics_database.connect()
+    csr = metrics_database.getCursor()
+    sql = 'SELECT seriesId, hash FROM portal_metadata_test;'
+
+    portal_hash = {}
+    try:
+        csr.execute(sql)
+        rows = csr.fetchall()
+    except Exception as e:
+        logger.error("Exception occured while performing DB operation : " + e)
+    return portal_hash
 
 def getPIDRecords():
     """
@@ -189,6 +256,7 @@ def testSetUP():
     Temporary fixture to test the functionalities
     :return:
     """
+    logger = getESSyncLogger(name="es_eventlog_sync")
     test_fixture = {}
 
     # Just a random test pid from eventlog-0 index
@@ -203,15 +271,14 @@ def updateRecords():
     Updates the record and writes it down to the ES index
     :return:
     """
+    logger = getESSyncLogger(name="es_eventlog_sync")
     metrics_elastic_search = MetricsElasticSearch()
     metrics_elastic_search.connect()
     results_tuple = getPIDRecords()
     test_fixtures = testSetUP()
     total_count = len(results_tuple["hits"]["hits"])
 
-    # print(total_count)
     for read_event_entry in results_tuple["hits"]["hits"]:
-        # print(json.dumps(read_event_entry, indent=2))
 
         portalIdentifierArray = []
         if "portalIdentifier" in read_event_entry["_source"]:
@@ -220,7 +287,6 @@ def updateRecords():
         portalIdentifierArray.append(test_fixtures["portalIdentifiers"]["DBO"])
         read_event_entry["_source"]["portalIdentifier"] = portalIdentifierArray
 
-        # print(json.dumps(read_event_entry, indent=2))
         metrics_elastic_search.updateRecord("eventlog-0", read_event_entry)
         break
     return
@@ -249,6 +315,7 @@ def main():
     )
 
     args = parser.parse_args()
+
     # Setup logging verbosity
     levels = [logging.WARNING, logging.INFO, logging.DEBUG]
     level = levels[min(len(levels) - 1, args.log_level)]
@@ -262,7 +329,8 @@ def main():
         end_date = datetime.datetime.strptime(end_date, "%Y-%m-%dT%H:%M:%S")
 
     # updateRecords()
-    getPortalMetadata("urn:uuid:8cdb22c6-cb33-4553-93ca-acb6f5d53ee4")
+    # getPortalMetadata(seriesId="urn:uuid:8cdb22c6-cb33-4553-93ca-acb6f5d53ee4")
+    performRegularPortalChecks()
     return
 
 
