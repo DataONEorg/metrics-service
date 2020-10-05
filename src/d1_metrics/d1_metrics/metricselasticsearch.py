@@ -381,8 +381,6 @@ class MetricsElasticSearch(object):
     if index is None:
       index = self.indexname
 
-
-
     # Set up a raw search query
     search_body = {
       "query": {
@@ -409,10 +407,11 @@ class MetricsElasticSearch(object):
     search_body["query"]["bool"]["must"].append( q )
 
     try:
-      results = self._es.search(index=index, body=search_body, limit=limit)
+      results = self._es.search(index=index, body=search_body)
       if results["hits"]["hits"] is None:
         raise ValueError("No hits in result.")
       return results
+
     except Exception as e:
       self._L.error(e)
     return None
