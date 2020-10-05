@@ -627,7 +627,7 @@ def getAsyncPortalDatasetIdentifierFamilyByBatches(portal_pids):
   t_delta = time.time() - t_0
   _L.debug('getAsyncPortalDatasetIdentifierFamily:t1=%.4f', t_delta)
   batch_size = BATCH_SIZE
-  datasetIdentifierFamily = []
+  datasetIdentifierFamily = set()
   totalDatasetIdentifierFamilySize = 0
 
   def _fetch(batch_portal_pids):
@@ -661,10 +661,11 @@ def getAsyncPortalDatasetIdentifierFamilyByBatches(portal_pids):
         tasks.append(loop.run_in_executor(executor, _fetch, batch_portal_pids))
 
       for response in await asyncio.gather(*tasks):
+        _L.info(response)
         datasetIdentifierFamily_results.append(response)
         for i in response[0]:
           for identifier in i["datasetIdentifierFamily"]:
-            datasetIdentifierFamily.append(identifier)
+            datasetIdentifierFamily.add(identifier)
 
 
   _L.debug("Enter")
