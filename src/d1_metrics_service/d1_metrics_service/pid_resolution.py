@@ -628,6 +628,8 @@ def getAsyncPortalDatasetIdentifierFamilyByBatches(portal_pids):
   _L.debug('getAsyncPortalDatasetIdentifierFamily:t1=%.4f', t_delta)
   batch_size = BATCH_SIZE
   datasetIdentifierFamily = set()
+  datasetIdentifierFamilyList = []
+  datasetIdentifierFamily.update(portal_pids)
   totalDatasetIdentifierFamilySize = 0
 
   def _fetch(batch_portal_pids):
@@ -664,8 +666,7 @@ def getAsyncPortalDatasetIdentifierFamilyByBatches(portal_pids):
         _L.info(response)
         datasetIdentifierFamily_results.append(response)
         for i in response[0]:
-          for identifier in i["datasetIdentifierFamily"]:
-            datasetIdentifierFamily.add(identifier)
+          datasetIdentifierFamily.update(i["datasetIdentifierFamily"])
 
 
   _L.debug("Enter")
