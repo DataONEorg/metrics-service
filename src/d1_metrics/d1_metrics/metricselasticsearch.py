@@ -265,16 +265,31 @@ class MetricsElasticSearch(object):
     return search_body
 
 
-  def _getQueryResults(self, index, search_body, limit):
+  def _getQueryResults(self, index, search_body, limit, rawSearches=False):
     """
 
     :param index:
     :param search_body:
     :param limit:
+    :param rawSearches:
     :return: Returns ES Query results
     """
     self._L.info("Executing: %s", json.dumps(search_body, indent=2))
     results = self._scan(query=search_body, index=index)
+
+    counter = 0
+    total_hits = 0
+    data = []
+    if rawSearches:
+
+      for hit in results:
+        result = hit[0]
+        counter = hit[1]
+        total_hits = hit[2]
+
+        data.append(result)
+      return data, total_hits
+
     counter = 0
     total_hits = 0
     data = []
@@ -386,9 +401,7 @@ class MetricsElasticSearch(object):
       "query": {
         "bool": {
           "must": [
-            {
-              "term": {"beat.name": self._beatname}
-            },
+
           ],
           "must_not": [
 
@@ -404,17 +417,34 @@ class MetricsElasticSearch(object):
           "query": "\/cn\/v2\/query\/solr\/",
         }
       }
-    search_body["query"]["bool"]["must"].append( q )
+    search_body["query"]["bool"]["must"].append(q)
 
     try:
-      results = self._es.search(index=index, body=search_body)
-      if results["hits"]["hits"] is None:
-        raise ValueError("No hits in result.")
-      return results
+      return self._getQueryResults(index=index, search_body=search_body, limit=limit, rawSearches=True)
 
     except Exception as e:
       self._L.error(e)
     return None
+
+
+  def updateEvents(self, index_name, record):
+    """
+    Updates the event in the ES index
+    :param index_name:
+    :param record:
+    :return: Boolean flag for update status
+    """
+    try:
+      self._es.update(index=index_name,
+                    id = record["_id"],
+                    doc_type=self._doc_type,
+                    body={"doc": record["_source"]})
+
+      return True
+    except Exception as e:
+      self._L.error(e)
+    return False
+
 
 
   def getSessions(self,

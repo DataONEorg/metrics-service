@@ -22,8 +22,10 @@ import argparse
 import datetime
 import psycopg2
 import requests
-
+import asyncio
 import concurrent.futures
+
+from aiohttp import ClientSession
 
 from d1_metrics import common
 from d1_metrics.solrclient import SolrClient
@@ -41,7 +43,7 @@ DATAONE_MN_SOLR = [
     "https://knb.ecoinformatics.org/knb/d1/mn/v2/query",
 ]
 
-CONCURRENT_REQUESTS = 20  # max number of concurrent requests to run
+CONCURRENT_REQUESTS = 10  # max number of concurrent requests to run
 
 ZERO = datetime.timedelta(0)
 
@@ -88,7 +90,7 @@ def performRegularPortalChecks():
     """
     logger = getESSyncLogger(name="es_eventlog_sync")
     t_start = time.time()
-    t_delta = time.time() - t_start
+
     logger.info("Beginning performRegularPortalChecks")
 
     # TODO : replace with solr to get the list of portals that needs update
@@ -96,6 +98,7 @@ def performRegularPortalChecks():
     logger.info("Fixture set up complete")
 
     logger.info("Beginning handle Portal Job")
+
     for key in test_fixture["portalIdentifiers"]:
         logger.info("Performing job for seriesId: " + test_fixture["portalIdentifiers"][key])
         handlePortalJob(test_fixture["portalIdentifiers"][key])
@@ -174,7 +177,7 @@ def handlePortalJob(seriesId=""):
     """
     logger = getESSyncLogger(name="es_eventlog_sync")
     t_start = time.time()
-    t_delta = time.time() - t_start
+
     logger.info("Beginning performRegularPortalChecks")
 
     # Initializing the lists
@@ -182,6 +185,7 @@ def handlePortalJob(seriesId=""):
     portal_DIF = []
     PDIF = set()
     total_portal_DIF_count = 0
+    updateHash = False
 
     logger.info(seriesId)
 
@@ -192,11 +196,13 @@ def handlePortalJob(seriesId=""):
 
     # resolving collection query and getting the PIDs from identifiers index
     portal_collection_PIDs = pid_resolution.resolveCollectionQueryFromSolr(collectionQuery=portal_metadata["collectionQuery"])
-    logger.info(len(portal_collection_PIDs))
+    logger.debug("total PIDs after resolving collection query: " + str(len(portal_collection_PIDs)))
+
     PDIF, total_portal_DIF_count = pid_resolution.getAsyncPortalDatasetIdentifierFamilyByBatches(portal_collection_PIDs)
 
     portal_DIF = list(PDIF)
-    logger.info("count = " + str(total_portal_DIF_count))
+    logger.debug("total matches found in indentifiers-* index: " + str(total_portal_DIF_count))
+    logger.debug("length of list DIF: " + str(len(portal_DIF)))
 
     # generate hash
     portal_metadata["hash"] = generatePortalHash(portalDatasetIdentifierFamily=portal_DIF)
@@ -205,13 +211,21 @@ def handlePortalJob(seriesId=""):
     # check in the DB
     logger.info("Evaluating previous stored hash.")
     previousPortalCheckHash = retrievePortalHash(seriesId=seriesId)
+    logger.info("prev hash : " + previousPortalCheckHash)
+
     if ((previousPortalCheckHash is None) or (previousPortalCheckHash != portal_metadata["hash"])):
-        logger.info("Hash check indicates the index is out of date for seriesId : " + seriesId)
+        updateHash = True
         portalIndexUpdateRequired = True
+
+        if (previousPortalCheckHash is None):
+            logger.info("Hash not found for : " + seriesId)
+            logger.info("Hash check indicates the index is out of date for seriesId : " + seriesId)
+            updateHash = False
 
     # update if required; else continue
     if(portalIndexUpdateRequired):
         updateIndex(seriesId=seriesId, PID_List=portal_DIF)
+        # storePortalHash(seriesId=seriesId,hashVal=portal_metadata["hash"], updateEntry=updateHash)
 
     t_delta = time.time() - t_start
     logger.info("Completed check for " + seriesId)
@@ -227,7 +241,6 @@ def generatePortalHash(portalDatasetIdentifierFamily=[]):
     """
     logger = getESSyncLogger(name="es_eventlog_sync")
     logger.info("Generating portal collection hash")
-    logger.info(str(len(portalDatasetIdentifierFamily)))
     portalDatasetIdentifierFamily.sort()
     tuple_portalDatasetIdentifierFamily = tuple(portalDatasetIdentifierFamily)
 
@@ -237,7 +250,7 @@ def generatePortalHash(portalDatasetIdentifierFamily=[]):
     return m.hexdigest()
 
 
-def storePortalHash(seriesId="", hashVal=None, metrics_database=None):
+def storePortalHash(seriesId="", hashVal=None, metrics_database=None, updateEntry=False):
     """
     Stores portal hash in the database
     :return:
@@ -248,7 +261,10 @@ def storePortalHash(seriesId="", hashVal=None, metrics_database=None):
         metrics_database = MetricsDatabase()
         metrics_database.connect()
     csr = metrics_database.getCursor()
-    sql = "INSERT INTO portal_metadata_test (id, series_id, hash) VALUES (DEFAULT , '" + seriesId + "','" + hashVal + "');"
+    if not updateEntry:
+        sql = "INSERT INTO portal_metadata_test (id, series_id, hash) VALUES (DEFAULT , '" + seriesId + "','" + hashVal + "');"
+    else:
+        sql = "UPDATE portal_metadata_test SET hash = '" + hashVal + "' WHERE series_id = '" + seriesId + "';"
 
     try:
         csr.execute(sql)
@@ -306,6 +322,7 @@ def getPIDRecords(PID):
     """
     metrics_elastic_search = MetricsElasticSearch()
     metrics_elastic_search.connect()
+    logger = getESSyncLogger(name="es_eventlog_sync")
 
     # set up the query
     query = {
@@ -329,6 +346,7 @@ def testSetUP():
     test_fixture["PID"] = "aekos.org.au/collection/sa.gov.au/bdbsa_veg/survey_88.20160201"
     test_fixture["portalIdentifiers"] = {}
     test_fixture["portalIdentifiers"]["DBO"] = "urn:uuid:8cdb22c6-cb33-4553-93ca-acb6f5d53ee4"
+    # test_fixture["portalIdentifiers"]["CALM"] = "urn:uuid:77fc14cc-b69d-4e21-8c5a-1e9cdc79ad4b"
     return test_fixture
 
 
@@ -340,32 +358,51 @@ def updateRecords(seriesId="", PID=""):
     logger = getESSyncLogger(name="es_eventlog_sync")
     metrics_elastic_search = MetricsElasticSearch()
     metrics_elastic_search.connect()
+    eventSuccessCount = 0
+    eventFailCount = 0
+    writeNotNeeded = 0
+
     data = getPIDRecords(PID)
     total_hits = 0
+
     if data is not None:
-        total_hits = data["hits"]["total"]
+        total_hits = data[1]
 
     if total_hits > 0:
-        for read_event_entry in data["hits"]["hits"]:
-            portalIdentifierArray = []
 
-            if "_index" in read_event_entry:
-                read_event_entry_index = read_event_entry["_index"]
-            else:
-                logger.error("Cannot update entry: " + read_event_entry["_id"])
-                continue
+        for read_event_entry in data[0]:
+            try:
+                portalIdentifierArray = []
 
-            if ((len(seriesId) > 0) and seriesId is not None ):
-                if "portalIdentifier" in read_event_entry["_source"]:
-                    portalIdentifierArray = read_event_entry["_source"]["portalIdentifier"]
+                if "_index" in read_event_entry:
+                    read_event_entry_index = read_event_entry["_index"]
+                else:
+                    logger.error("Cannot update entry: " + read_event_entry["_id"])
+                    eventFailCount += 1
+                    continue
 
-                if seriesId not in portalIdentifierArray:
-                    portalIdentifierArray.append(seriesId)
-                    read_event_entry["_source"]["portalIdentifier"] = portalIdentifierArray
+                if ((len(seriesId) > 0) and seriesId is not None ):
+                    if "portalIdentifier" in read_event_entry["_source"]:
+                        portalIdentifierArray = read_event_entry["_source"]["portalIdentifier"]
+                    else:
+                        read_event_entry["_source"]["portalIdentifier"] = []
 
-                    metrics_elastic_search.updateRecord(read_event_entry_index, read_event_entry)
+                    if seriesId not in portalIdentifierArray:
+                        portalIdentifierArray.append(seriesId)
+                        read_event_entry["_source"]["portalIdentifier"].extend(portalIdentifierArray)
 
-    return total_hits
+                        updateStat = metrics_elastic_search.updateEvents(read_event_entry_index, read_event_entry)
+                        if updateStat:
+                            eventSuccessCount += 1
+                        else:
+                            eventFailCount += 1
+                    else:
+                        writeNotNeeded += 1
+            except Exception as e:
+                logger.error(e)
+                logger.info("Error occured here: " + json.dumps(read_event_entry, indent=2))
+
+    return total_hits, eventSuccessCount, eventFailCount, writeNotNeeded
 
 
 def updateIndex(seriesId="", PID_List=None):
@@ -376,31 +413,62 @@ def updateIndex(seriesId="", PID_List=None):
     """
     logger = getESSyncLogger(name="es_eventlog_sync")
     t_start = time.time()
-    t_delta = time.time() - t_start
-
 
     # TODO include add or remove operation to make appropriate changes for that PID
 
     totalCount = 0
     PID_List_iteration_count = 0
     if( (seriesId is not None) and (PID_List is not None)):
-        logger.info("Updating idnex for " + str(seriesId))
+        logger.info("Updating index for " + str(seriesId))
         logger.info("Total PIDs to update:" + str(len(PID_List)))
 
         # TODO get the existing list
 
         # TODO check for PIDs that need updating
 
+        # Async PID updates
+        async def _work(seriesId, PID_List):
+            logger.info("Beginning async work")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as executor:
+                PID_List_iteration_count = 0
+                totalWorkCount = 0
+                loop = asyncio.get_event_loop()
+                tasks = []
 
-        for identifier in PID_List:
-            PID_List_iteration_count+=1
-            if(PID_List_iteration_count %100 == 0):
-                logger.info(str(PID_List_iteration_count) + " of " + str(len(PID_List)) + " updated; impacting "
-                            + str(totalCount) + " events in the eventlog-* index")
-            totalCount += updateRecords(seriesId=seriesId, PID=identifier)
+                for PID in PID_List:
+                    tasks.append(loop.run_in_executor(executor, updateRecords, seriesId, PID))
 
+                logger.info("Entire PID_List tasks initialized")
+                for resp in await asyncio.gather(*tasks):
+                    # Logging and status tracking
+                    PID_List_iteration_count += 1
+                    if (PID_List_iteration_count % 100 == 0):
+                        logger.info(str(PID_List_iteration_count) + " of " + str(len(PID_List)) + " updated; impacting "
+                                    + str(totalWorkCount) + " events in the eventlog-* index")
 
-    logger.info("Updated total of " + str(totalCount) + " records for seriesId: " + seriesId)
+                    totalCountList.append(resp)
+                    # totalWorkCount += resp[0]
+                    totalWorkCount += resp[0]
+
+        totalCountList = []
+        # In a multithreading environment such as under gunicorn, the new thread created by
+        # gevent may not provide an event loop. Create a new one if necessary.
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError as e:
+            logger.info("Creating new event loop.")
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        future = asyncio.ensure_future(_work(seriesId, PID_List))
+        loop.run_until_complete(future)
+        logger.debug("elapsed:%fsec", time.time() - t_start)
+
+    logger.info("Updated total of " + str(sum(i[0] for i in totalCountList)) + " events for seriesId: " + seriesId)
+    logger.info("Successful event writes " + str(sum(i[1] for i in totalCountList)) + " for seriesId: " + seriesId)
+    logger.info("Failed event writes " + str(sum(i[2] for i in totalCountList)) + " for seriesId: " + seriesId)
+    logger.info("Event already updated " + str(sum(i[3] for i in totalCountList)) + " for seriesId: " + seriesId)
+    # logger.info("Updated total of " + str(sum(totalCountList)) + " events for seriesId: " + seriesId)
 
     t_delta = time.time() - t_start
     logger.info("Updated index for " + seriesId)
@@ -448,6 +516,8 @@ def main():
     # updateRecords()
     # getPortalMetadata(seriesId="urn:uuid:8cdb22c6-cb33-4553-93ca-acb6f5d53ee4")
     performRegularPortalChecks()
+
+    # print(json.dumps(getPIDRecords(PID="doi: 10.18739/A2F320"), indent=2))
 
     # storePortalHash(seriesId="urn:uuid:8cdb22c6-cb33-4553-93ca-acb6f5d53ee4", hashVal="8914987b3afe11cad14010e417e37111")
     # print(retrievePortalHash(seriesId="urn:uuid:8cdb22c6-cb33-4553-93ca-acb6f5d53ee4"))
