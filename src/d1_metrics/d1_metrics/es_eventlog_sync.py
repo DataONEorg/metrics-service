@@ -242,7 +242,7 @@ def handlePortalJob(seriesId=""):
     # update if required; else continue
     if(portalIndexUpdateRequired):
         updateIndex(seriesId=seriesId, PID_List=portal_DIF)
-        # storePortalHash(seriesId=seriesId,hashVal=portal_metadata["hash"], updateEntry=updateHash)
+        storePortalHash(seriesId=seriesId,hashVal=portal_metadata["hash"], updateEntry=updateHash)
 
     t_delta = time.time() - t_start
     logger.info("Completed check for " + seriesId)
