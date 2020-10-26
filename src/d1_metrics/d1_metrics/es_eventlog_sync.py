@@ -94,27 +94,43 @@ def performRegularPortalChecks():
     logger.info("Beginning performRegularPortalChecks")
 
     # TODO : replace with solr to get the list of portals that needs update
-    test_fixture = testSetUP()
-    logger.info("Fixture set up complete")
+    portalDict = performRegularPortalCollectionQueryChecks()
+    logger.info("Loaded portals from Solr")
 
     logger.info("Beginning handle Portal Job")
 
-    for key in test_fixture["portalIdentifiers"]:
-        logger.info("Performing job for seriesId: " + test_fixture["portalIdentifiers"][key])
-        handlePortalJob(test_fixture["portalIdentifiers"][key])
+    for key in portalDict:
+        logger.info("Performing job for portal " + key + " with seriesId: " + portalDict[key])
+        handlePortalJob(portalDict[key])
     t_delta = time.time() - t_start
     logger.info('performRegularPortalChecks:t1=%.4f', t_delta)
 
     return
 
 
-def performRegularPortalCollectionQueryChecks():
+def performRegularPortalCollectionQueryChecks(fields=None):
     """
     Checks for newly added datasets that satisfy the collection query
     associated with this portal
     :return:
     """
-    pass
+
+    # TODO Add time component
+
+    # Set Portal objects retieval query
+    formatId = "https://purl.dataone.org/portals-1.0.0"
+    queryString = "label:* AND -obsoletedBy:* AND formatId:\"" + formatId + "\""
+
+    if fields is None:
+        fields = "seriesId, label, id"
+
+    portalData = querySolr(query_string=queryString, rows="10000000", fl=fields)
+
+    portalDict = {}
+    for portalObject in portalData["response"]["docs"]:
+        portalDict[portalObject["label"]] = portalObject["seriesId"]
+
+    return portalDict
 
 
 def querySolr(url="https://cn.dataone.org/cn/v2/query/solr/?", query_string="*:*", wt="json", rows="1", fl=''):
@@ -137,7 +153,8 @@ def querySolr(url="https://cn.dataone.org/cn/v2/query/solr/?", query_string="*:*
         if response.status_code == 200:
             return response.json()
         else:
-            raise Exception("Error while wuerying solr. Service received Non OK status code")
+            logger.error(response.text)
+            raise Exception("Error while querying solr. Service received Non OK status code")
     except Exception as e:
         logger.error(msg=e)
         return None
@@ -516,6 +533,7 @@ def main():
     # updateRecords()
     # getPortalMetadata(seriesId="urn:uuid:8cdb22c6-cb33-4553-93ca-acb6f5d53ee4")
     performRegularPortalChecks()
+    # performRegularPortalCollectionQueryChecks()
 
     # print(json.dumps(getPIDRecords(PID="doi: 10.18739/A2F320"), indent=2))
 
