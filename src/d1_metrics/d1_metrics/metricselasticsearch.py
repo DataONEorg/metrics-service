@@ -265,7 +265,7 @@ class MetricsElasticSearch(object):
     return search_body
 
 
-  def _getQueryResults(self, index, search_body, limit, rawSearches=False):
+  def _getQueryResults(self, index, search_body, limit, rawSearches=False, request_timeout=None):
     """
 
     :param index:
@@ -275,7 +275,10 @@ class MetricsElasticSearch(object):
     :return: Returns ES Query results
     """
     self._L.info("Executing: %s", json.dumps(search_body, indent=2))
-    results = self._scan(query=search_body, index=index)
+    if request_timeout:
+      results = self._scan(query=search_body, index=index, request_timeout=request_timeout)
+    else:
+      results = self._scan(query=search_body, index=index)
 
     counter = 0
     total_hits = 0
@@ -380,7 +383,8 @@ class MetricsElasticSearch(object):
                   limit=10,
                   date_start=None,
                   date_end=None,
-                  fields=None):
+                  fields=None,
+                  request_timeout=30):
     """
     Performs a search Query on the ES index. Based on the parametrs passes, it sets the search body and returns the
     result to the calling function.
@@ -401,10 +405,30 @@ class MetricsElasticSearch(object):
       "query": {
         "bool": {
           "must": [
-
+            {
+              "term": {"event.key": "read"}
+            },
+            {
+              "terms": {
+                "formatType": [
+                  "DATA",
+                  "METADATA"
+                ]
+              }
+            }
           ],
           "must_not": [
-
+            {
+              "terms": {
+                "tags": [
+                  "ignore_ip",
+                  "machine_ua",
+                  "robot_ua",
+                  "dataone_ip",
+                  "robot_ip"
+                ]
+              }
+            }
           ]
         }
       }
@@ -420,7 +444,7 @@ class MetricsElasticSearch(object):
     search_body["query"]["bool"]["must"].append(q)
 
     try:
-      return self._getQueryResults(index=index, search_body=search_body, limit=limit, rawSearches=True)
+      return self._getQueryResults(index=index, search_body=search_body, limit=limit, rawSearches=True, request_timeout=30)
 
     except Exception as e:
       self._L.error(e)
