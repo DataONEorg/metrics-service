@@ -155,6 +155,14 @@ class MetricsReader:
                 # Called when generating metrics for a specific portal
                 results, resultDetails = self.getMetricsPerPortal(filter_by[0]["values"][0], collectionQueryFilterObject)
 
+            if (filter_type == "portal_indexed") and interpret_as == "list":
+                collectionQueryFilterObject = {}
+                collectionQueryFilterObjectList = list(filter(lambda filter_object: filter_object['filterType'] == 'query', filter_by))
+                if ( len(collectionQueryFilterObjectList) ):
+                    collectionQueryFilterObject = collectionQueryFilterObjectList[0]
+                # Called when generating metrics for a specific portal
+                results, resultDetails = self.getMetricsPerIndexedPortal(filter_by[0]["values"][0], collectionQueryFilterObject)
+
         self.response["results"] = results
         self.response["resultDetails"] = resultDetails
         self.logger.debug("exit process_request, duration=%fsec", time.time()-t_0)
@@ -1492,6 +1500,173 @@ class MetricsReader:
                 datasetIdentifierFamily.append(identifier)
         
         return(datasetIdentifierFamily, results[1])
+
+
+    def getMetricsPerIndexedPortal(self, portalLabel, collectionQueryFilterObject=None):
+        """
+            Handles the Metrics generation for a given indexed portal
+            :param: portal label
+            :returns:
+                Metrics Service response for the Metrics filter type 'portal'
+
+        """
+        # Setting the query for the user profile
+        metrics_elastic_search = MetricsElasticSearch()
+        metrics_elastic_search.connect()
+
+        results, resultDetails = {}, {}
+        t_start = time.time()
+
+        # Setting flags abse don the query params
+        includeCitations, includeDownloads, includeViews = False, False, False
+        if "citations" in self.response["metricsRequest"]["metrics"]:
+            includeCitations = True
+        if "downloads" in self.response["metricsRequest"]["metrics"]:
+            includeDownloads = True
+        if "views" in self.response["metricsRequest"]["metrics"]:
+            includeViews = True
+
+        # Defaulting date to beginnning and end timestamps
+        start_date = "01/01/2000"
+        end_date = datetime.today().strftime('%m/%d/%Y')
+
+        # update the date range if supplied in the query
+        if (len(self.response["metricsRequest"]["filterBy"]) > 0):
+            if ((self.response["metricsRequest"]["filterBy"][1]["filterType"] == "month" or
+                         self.response["metricsRequest"]["filterBy"][1]["filterType"] == "day" or
+                         self.response["metricsRequest"]["filterBy"][1]["filterType"] == "year") and
+                        self.response["metricsRequest"]["filterBy"][1]["interpretAs"] == "range"):
+                start_date = self.response["metricsRequest"]["filterBy"][1]["values"][0]
+                end_date = self.response["metricsRequest"]["filterBy"][1]["values"][1]
+
+                # Get the aggregation Type
+                # default it to months
+                aggType = "month"
+                if (len(self.response["metricsRequest"]["groupBy"]) > 0):
+                    if "months" in self.response["metricsRequest"]["groupBy"]:
+                        aggType = "month"
+                    elif "days" in self.response["metricsRequest"]["groupBy"]:
+                        aggType = "day"
+                    elif "years" in self.response["metricsRequest"]["groupBy"]:
+                        aggType = "year"
+                self.logger.debug('aggType: %s', aggType)
+
+        # No need to get the collection query
+        # collectionQuery = None
+        # if collectionQueryFilterObject:
+        #     collectionQuery = collectionQueryFilterObject["values"][0]
+        #     resultDetails["passedQuery"] = collectionQuery
+        # else:
+        #     # Retrieving collection Query
+        #     collectionQuery = pid_resolution.getPortalCollectionQueryFromSolr(url=None, portalLabel=portalLabel)
+        #
+        # if collectionQuery is None:
+        #     results["error"] = "Operational error: Couldn't retrieve collection query"
+        #     resultDetails["status_code"] = falcon.HTTP_500
+        #     return results, resultDetails
+
+        # collectionQuery = collectionQuery.replace('-obsoletedBy:* AND ', '')
+
+        # resultDetails["collection_query"] = collectionQuery
+        # resultDetails["collection_query_time"] = time.time() - t_start
+
+        # t_portal_pids = time.time()
+        #
+        # # Getting portal PIDs from Collection Query
+        # portal_pids = pid_resolution.resolveCollectionQueryFromSolr(url=None, collectionQuery=collectionQuery)
+        #
+        # resultDetails["portal_pids_size"] = len(portal_pids)
+
+        t_portal_dataset_identifier_family = time.time()
+
+        # Get the portal's series identifier from Solr
+        portalSeriesId = pid_resolution.getPortalSeriesId(portalLabel=portalLabel)
+        pdif = []
+        pdif.append(portalSeriesId)
+
+        data = {}
+        if includeDownloads or includeViews:
+            # Search body for Portal Metrics
+            search_body = [
+                {
+                    "term": {"event.key": "read"}
+                },
+                {
+                    "term": {
+                        "portalIdentifier.keyword": portalSeriesId
+                    }
+                },
+                {
+                    "exists": {
+                        "field": "sessionId"
+                    }
+                },
+                {
+                    "terms": {
+                        "formatType": [
+                            "DATA",
+                            "METADATA"
+                        ]
+                    }
+                }
+            ]
+
+            # aggregation body for Portal Metrics
+            aggregation_body = {
+                "pid_list": {
+                    "composite": {
+                        "sources": [
+                            {
+                                "format": {
+                                    "terms": {
+                                        "field": "formatType"
+                                    }
+                                }
+                            },
+                            {
+                                aggType: {
+                                    "date_histogram": {
+                                        "field": "dateLogged",
+                                        "interval": aggType
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+
+            # if the aggregation is requested by country, add country object to groupBy
+            if ("country" in self.response["metricsRequest"]["groupBy"]):
+                countryObject = {
+                    "country": {
+                        "terms": {
+                            "field": "geoip.country_code2.keyword",
+                            "missing_bucket": "true"
+                        }
+                    }
+                }
+                aggregation_body["pid_list"]["composite"]["sources"].append(countryObject)
+
+            t_delta = time.time() - t_start
+            self.logger.debug('getMetricsPerPortal:t2=%.4f', t_delta)
+
+            t_es_start = time.time()
+
+            # Query the ES with the designed Search and Aggregation body
+            # uses the start_date and the end_date for the time range of data retrieval
+            data = metrics_elastic_search.iterate_composite_aggregations(search_query=search_body,
+                                                                         aggregation_query=aggregation_body,
+                                                                         start_date=datetime.strptime(start_date,
+                                                                                                      '%m/%d/%Y'),
+                                                                         end_date=datetime.strptime(end_date,
+                                                                                                    '%m/%d/%Y'))
+
+        requestMetadata = {}
+        requestMetadata["collectionDetails"] = resultDetails
+        return (
+        self.formatElasticSearchResults(data, pdif, start_date, end_date, aggregationType=aggType, objectType="portal",
+                                        requestMetadata=requestMetadata))
 
 
     def formatElasticSearchResults(self, data, PIDList, start_date, end_date, aggregationType="month", objectType=None, requestMetadata={}):

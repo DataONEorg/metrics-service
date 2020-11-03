@@ -453,6 +453,39 @@ def getPortalCollectionQueryFromSolr(url = None, portalLabel = None):
     return colelctionQuery
 
 
+def getPortalSeriesId(url = None, portalLabel = None,):
+    """
+      Returns the collection query for the portal
+      :param: url
+      :param: portalLabel
+      :param: pid
+      :param: seriesId
+
+      :returns:
+        CollectionQuery string retrieved from SOLR
+    """
+    _L, t_0 = _getLogger()
+    try:
+      if url is None:
+        url = "https://cn.dataone.org/cn/v2/query"
+
+      # Create a solr client object
+      solrClientObject = SolrClient(url, "solr")
+      solrQuery = "*:*"
+
+      # supports retrieval of collection query via portal label, seriesId and PID
+      if (portalLabel is not None):
+        solrQuery = "(-obsoletedBy:* AND (label:" + portalLabel + ") OR (seriesId:" + portalLabel + ") OR (id:" + portalLabel + "))"
+
+      data = solrClientObject.getFieldValues('seriesId', q=solrQuery)
+      seriesId = data["seriesId"][0]
+    except Exception as e:
+      colelctionQuery = None
+      _L.error(e)
+
+    return seriesId
+
+
 def resolveCollectionQueryFromSolr(url = None, collectionQuery = "*:*"):
   """
     Uses d1_metrics SolrClient to resolve a collection Query.
@@ -748,5 +781,6 @@ if __name__ == "__main__":
   # eg_pidsAndSid()
   # eg_getObsolescenceChain()
   # print("==eg: getResolvePids==")
+  getPortalCollectionQueryFromSolr(portalLabel="DBO")
   # eg_getResolvePids()
   # getPortalCollectionQuery(url="https://dev.nceas.ucsb.edu/knb/d1/mn/v2/query/solr/?", portalLabel="portal-test")
