@@ -815,14 +815,20 @@ class MetricsDatabase(object):
             target_id = citations_request["metadata"][0]["target_id"]
             target_doi_start = target_id.index("10.")
             target_doi = target_id[target_doi_start:]
+        else:
+            self._L.error("No target_id found")
 
-        if citations_request["metadata"][0]["target_id"] is not None:
+        if citations_request["metadata"][0]["source_id"] is not None:
             source_id = citations_request["metadata"][0]["source_id"]
             source_doi_start = source_id.index("10.")
             source_doi = source_id[source_doi_start:]
+        else:
+            self._L.error("No source_id found")
 
-        if citations_request["metadata"][0]["target_id"] is not None:
+        if citations_request["metadata"][0]["relation_type"] is not None:
             relation_type = citations_request["metadata"][0]["relation_type"]
+        else:
+            self._L.error("No relation_type found")
 
         # retrieve metadata from Metrics Database
         citation_object = self.getDOIMetadata(source_doi)
@@ -832,6 +838,99 @@ class MetricsDatabase(object):
         citations_data = []
         citations_data.append(citation_object)
         self.insertCitationObjects(citations_data=citations_data)
+
+
+    def parseCitationsRequestsFromDisk(self, file_name = None):
+        file_object = open(file_name, )
+
+        # reading in the JOSN object
+        citation_data = json.load(file_object)
+
+        citations_request = {
+            "request_type": "dataset",
+            "metadata":
+                [
+                    {
+                        "target_id": "",
+                        "source_id": "",
+                        "relation_type": ""
+                    }
+                ]
+        }
+
+        for citations_raw_request in citation_data:
+            if "relation_type" not in citations_raw_request:
+                citations_raw_request["relation_type"] = "isReferencedBy"
+
+            citations_request["metadata"][0]["target_id"] = citations_raw_request["target_id"]
+            citations_request["metadata"][0]["source_id"] = citations_raw_request["source_id"]
+            citations_request["metadata"][0]["relation_type"] = citations_raw_request["relation_type"]
+            # print(json.dumps(citations_request))
+
+            self.processCitationQueueObject(citations_request)
+        return
+
+
+    def registerQueuedCitationRequest(self):
+        """
+        Registers queued citation to Citations DB
+        :return:
+        """
+        registered_list = self.parseQueuedCitationRequests()
+        csr = self.getCursor()
+        for citation_object in registered_list:
+            citation_object_id = citation_object[0]
+            citation_object_request = citation_object[1]
+            ingest_attempt = citation_object[4]
+            citation_object_request_metadata = citation_object_request["metadata"]
+            citation_object_request_type = citation_object_request["request_type"]
+
+            if (citation_object_request_type == "dataset" and
+                        ingest_attempt < 3):
+                citation_object_request_target_id = citation_object_request_metadata[0]["target_id"]
+                citation_object_request_source_id = citation_object_request_metadata[0]["source_id"]
+                citation_object_request_relation_type = citation_object_request_metadata[0]["relation_type"]
+
+                try:
+                    self.processCitationQueueObject(citation_object_request)
+                    ingest_timestamp = datetime.now()
+
+                    sql = "UPDATE citations_registration_queue SET ingest_timestamp = " + str(
+                        datetime.now()) + "WHERE id = " + citation_object_id + ";"
+                    try:
+                        csr.execute(sql)
+
+                    except psycopg2.DatabaseError as e:
+                        message = 'Database error! ' + e
+                        self._L.exception('Operational error!\n{0}')
+                        self._L.exception(e)
+
+                    except psycopg2.OperationalError as e:
+                        self._L.exception('Operational error!\n{0}')
+                        self._L.exception(e)
+
+                except Exception as e:
+                    self._L.exception(e)
+                    ingest_attempt += 1
+                    ingest_error = str(e)
+
+                    sql = "UPDATE citations_registration_queue SET ingest_attempts=%d WHERE id = %d ;" % (
+                    ingest_attempt, citation_object_id)
+                    try:
+                        csr.execute(sql)
+
+                    except psycopg2.DatabaseError as e:
+                        message = 'Database error! ' + e
+                        self._L.exception('Operational error!\n{0}')
+                        self._L.exception(e)
+
+                    except psycopg2.OperationalError as e:
+                        self._L.exception('Operational error!\n{0}')
+                        self._L.exception(e)
+
+                finally:
+                    self.conn.commit()
+        return
 
 
 if __name__ == "__main__":
@@ -855,3 +954,6 @@ if __name__ == "__main__":
     #   ]
     # }
     # md.processCitationQueueObject(citation_object)
+    # md.parseCitationsRequestsFromDisk("abs_cit_errored_fix.json")
+    # md.parseCitationsRequestsFromDisk("dbo_cits.json")
+    md.parseQueuedCitationRequests()
