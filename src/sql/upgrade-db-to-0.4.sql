@@ -1,0 +1,10 @@
+ALTER TABLE CITATIONS_TEST (
+  ADD COLUMN citation_status TEXT,
+  ADD COLUMN reporter TEXT,
+  ADD COLUMN reviewer TEXT,
+  ADD COLUMN relation_type TEXT
+);
+
+ALTER TABLE CITATIONS_METADATA_TEST (
+  ADD COLUMN portal_id TEXT[]
+);
