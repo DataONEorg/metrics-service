@@ -973,7 +973,8 @@ class MetricsElasticSearch(object):
                   "machine_ua",
                   "robot_ua",
                   "dataone_ip",
-                  "robot_ip"
+                  "robot_ip",
+                  "d1_admin_subject"
                 ]
               }
             }
