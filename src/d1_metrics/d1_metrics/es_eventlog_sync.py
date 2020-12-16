@@ -43,11 +43,44 @@ DATAONE_MN_SOLR = [
     "https://knb.ecoinformatics.org/knb/d1/mn/v2/query",
 ]
 
-CONCURRENT_REQUESTS = 10  # max number of concurrent requests to run
+CONCURRENT_REQUESTS = 3  # max number of concurrent requests to run
 
 ZERO = datetime.timedelta(0)
 
 BATCH_TDELTA_PERIOD = datetime.timedelta(minutes=10)
+
+DATAONE_ADMIN_SUBJECTS = ["CN=urn:node:CN,DC=dataone,DC=org","CN=urn:node:CNUNM1,DC=dataone,DC=org",
+                          "CN=urn:node:CNUCSB1,DC=dataone,DC=org","CN=urn:node:CNORC1,DC=dataone,DC=org",
+                          "CN=urn:node:KNB,DC=dataone,DC=org","CN=urn:node:ESA,DC=dataone,DC=org","CN=urn:node:SANPARKS,"
+                          "CN=ornldaac,DC=cilogon,DC=org","CN=urn:node:LTER,DC=dataone,DC=org",
+                          "CN=urn:node:CDL,DC=dataone,DC=org","CN=urn:node:PISCO,DC=dataone,DC=org",
+                          "CN=urn:node:ONEShare,DC=dataone,DC=org","CN=urn:node:mnORC1,DC=dataone,DC=org",
+                          "CN=urn:node:mnUNM1,DC=dataone,DC=org","CN=urn:node:mnUCSB1,DC=dataone,DC=org",
+                          "CN=urn:node:TFRI,DC=dataone,DC=org","CN=urn:node:USANPN,DC=dataone,DC=org",
+                          "CN=urn:node:SEAD,DC=dataone,DC=org","CN=urn:node:GOA,DC=dataone,DC=org",
+                          "CN=urn:node:KUBI,DC=dataone,DC=org","CN=urn:node:LTER_EUROPE",
+                          "CN=urn:node:DRYAD,DC=dataone,DC=org","CN=urn:node:CLOEBIRD,DC=dataone,DC=org",
+                          "CN=urn:node:EDACGSTORE,DC=dataone,DC=org","CN=urn:node:IOE,DC=dataone,DC=org",
+                          "CN=urn:node:US_MPC,DC=dataone,DC=org","CN=urn:node:EDORA,DC=dataone,DC=org",
+                          "CN=urn:node:RGD,DC=dataone,DC=org","CN=urn:node:GLEON,DC=dataone,DC=org",
+                          "CN=urn:node:IARC,DC=dataone,DC=org","CN=urn:node:NMEPSCOR,DC=dataone,DC=org",
+                          "CN=urn:node:TERN,DC=dataone,DC=org","CN=urn:node:NKN,DC=dataone,DC=org",
+                          "CN=urn:node:USGS_SDC,DC=dataone,DC=org","CN=urn:node:NRDC,DC=dataone,DC=org",
+                          "CN=urn:node:NCEI,DC=dataone,DC=org","CN=urn:node:PPBIO,DC=dataone,DC=org",
+                          "CN=urn:node:NEON,DC=dataone,DC=org","CN=urn:node:TDAR,DC=dataone,DC=org",
+                          "CN=urn:node:ARCTIC,DC=dataone,DC=org","CN=urn:node:BCODMO,DC=dataone,DC=org",
+                          "CN=urn:node:GRIIDC,DC=dataone,DC=org","CN=urn:node:R2R,DC=dataone,DC=org",
+                          "CN=urn:node:EDI,DC=dataone,DC=org","CN=urn:node:UIC,DC=dataone,DC=org",
+                          "CN=urn:node:RW,DC=dataone,DC=org","CN=urn:node:FEMC,DC=dataone,DC=org",
+                          "CN=urn:node:OTS_NDC,DC=dataone,DC=org","CN=urn:node:PANGAEA,DC=dataone,DC=org",
+                          "CN=urn:node:ESS_DIVE,DC=dataone,DC=org","CN=urn:node:CAS_CERN,DC=dataone,DC=org",
+                          "CN=urn:node:FIGSHARE_CARY,DC=dataone,DC=org",
+                          "CN=urn:node:mnTestIEDA_EARTHCHEM,DC=dataone,DC=org",
+                          "CN=urn:node:mnTestIEDA_USAP,DC=dataone,DC=org","CN=urn:node:mnTestIEDA_MGDL,DC=dataone,DC=org",
+                          "CN=urn:node:METAGRIL,DC=dataone,DC=org","CN=urn:node:ARM,DC=dataone,DC=org",
+                          "CN=urn:node:CA_OPC,DC=dataone,DC=org"]
+
+DATAONE_ADMIN_SUBJECTS_TAG = "d1_admin_subject"
 
 
 # ==========
@@ -494,6 +527,135 @@ def updateIndex(seriesId="", PID_List=None):
     return
 
 
+def subjectFiltering():
+    """
+
+    :return:
+    """
+    logger = getESSyncLogger(name="es_eventlog_sync")
+    data, total_hits = getAdminSubjects()
+    updateTagsForAdminSubject(data, total_hits)
+
+
+def getAdminSubjects():
+    print("Getting the admin subjects")
+    metrics_elastic_search = MetricsElasticSearch()
+    metrics_elastic_search.connect()
+    logger = getESSyncLogger(name="es_eventlog_sync")
+
+    query = [
+        {
+            "term": {"nodeId": "urn:node:ESS_DIVE"}
+        },
+        {
+            "exists": {
+                "field": "sessionId"
+            }
+        },
+        {
+            "terms": {
+                "subject.key": DATAONE_ADMIN_SUBJECTS
+            }
+        }
+    ]
+
+    return metrics_elastic_search.getRawSearches(index="eventlog-*", q=query, limit=1)
+
+
+def updateTagsForAdminSubject(data, total_hits):
+    logger = getESSyncLogger(name="es_eventlog_sync")
+    t_start = time.time()
+
+    # TODO include add or remove operation to make appropriate changes for that PID
+
+    def _update_tags(tag_label, read_event_entry):
+        logger = getESSyncLogger(name="es_eventlog_sync")
+        metrics_elastic_search = MetricsElasticSearch()
+        metrics_elastic_search.connect()
+        eventFailCount = 0
+        eventSuccessCount = 0
+        writeNotNeeded = 0
+
+        try:
+            tags_array = []
+
+            if "_index" in read_event_entry:
+                read_event_entry_index = read_event_entry["_index"]
+            else:
+                logger.error("Cannot update entry: " + read_event_entry["_id"])
+                eventFailCount += 1
+
+            if (tag_label is not None):
+                if "tags" in read_event_entry["_source"]:
+                    tags_array = read_event_entry["_source"]["tags"]
+                else:
+                    read_event_entry["_source"]["tags"] = []
+
+                if tag_label not in tags_array:
+                    tags_array.append(tag_label)
+                    read_event_entry["_source"]["tags"].extend(tags_array)
+
+                    updateStat = metrics_elastic_search.updateEvents(read_event_entry_index, read_event_entry)
+                    if updateStat:
+                        eventSuccessCount += 1
+                    else:
+                        eventFailCount += 1
+                else:
+                    writeNotNeeded += 1
+        except Exception as e:
+            eventFailCount += 1
+            logger.error(e)
+            logger.info("Error occured here: " + json.dumps(read_event_entry, indent=2))
+        return eventSuccessCount, eventFailCount, writeNotNeeded
+
+    async def _bound_update_tags(sem, tag_label, event, session):
+        # Getter function with semaphore.
+        async with sem:
+            await _update_tags(tag_label, event)
+
+    # Async event updates
+    async def _work(data):
+        logger.info("Beginning async work")
+
+        tasks = []
+        tag_label = DATAONE_ADMIN_SUBJECTS_TAG
+
+        # create instance of Semaphore
+        sem = asyncio.Semaphore(1000)
+
+        # Create client session that will ensure we dont open new connection
+        # per each request.
+        async with ClientSession() as session:
+            for event in data:
+                task = asyncio.ensure_future(_bound_update_tags(sem, tag_label, event, session))
+                tasks.append(task)
+
+            responses = asyncio.gather(*tasks)
+            await responses
+
+
+    totalCountList = []
+    # In a multithreading environment such as under gunicorn, the new thread created by
+    # gevent may not provide an event loop. Create a new one if necessary.
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError as e:
+        logger.info("Creating new event loop.")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    future = asyncio.ensure_future(_work(data))
+    loop.run_until_complete(future)
+
+    logger.debug("elapsed:%fsec", time.time() - t_start)
+    t_delta = time.time() - t_start
+
+    logger.info("Updated index for ESS_DIVE" )
+    logger.info('updateIndex:t1=%.4f', t_delta)
+
+    return
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -532,13 +694,14 @@ def main():
 
     # updateRecords()
     # getPortalMetadata(seriesId="urn:uuid:8cdb22c6-cb33-4553-93ca-acb6f5d53ee4")
-    performRegularPortalChecks()
+    # performRegularPortalChecks()
     # performRegularPortalCollectionQueryChecks()
 
     # print(json.dumps(getPIDRecords(PID="doi: 10.18739/A2F320"), indent=2))
 
     # storePortalHash(seriesId="urn:uuid:8cdb22c6-cb33-4553-93ca-acb6f5d53ee4", hashVal="8914987b3afe11cad14010e417e37111")
     # print(retrievePortalHash(seriesId="urn:uuid:8cdb22c6-cb33-4553-93ca-acb6f5d53ee4"))
+    subjectFiltering()
     return
 
 

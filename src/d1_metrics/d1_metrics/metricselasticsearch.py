@@ -379,6 +379,7 @@ class MetricsElasticSearch(object):
   def getRawSearches(self,
                   index=None,
                   q=None,
+                  must_not_q=None,
                   session_id=None,
                   limit=10,
                   date_start=None,
@@ -441,12 +442,21 @@ class MetricsElasticSearch(object):
           "query": "\/cn\/v2\/query\/solr\/",
         }
       }
-    search_body["query"]["bool"]["must"].append(q)
+    else:
+      if (isinstance(q, list) ):
+        for query_object in q:
+          search_body["query"]["bool"]["must"].append(query_object)
+      if (isinstance(q, dict) ):
+        search_body["query"]["bool"]["must"].append(q)
 
+    self._L.info("query=" + json.dumps(search_body))
     try:
-      return self._getQueryResults(index=index, search_body=search_body, limit=limit, rawSearches=True, request_timeout=30)
+      self._L.info("retrieving events...")
+      data = self._getQueryResults(index=index, search_body=search_body, limit=limit, rawSearches=True, request_timeout=30)
+      return data
 
     except Exception as e:
+      print("error")
       self._L.error(e)
     return None
 
