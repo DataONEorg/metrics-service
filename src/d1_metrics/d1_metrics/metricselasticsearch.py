@@ -280,12 +280,15 @@ class MetricsElasticSearch(object):
     else:
       results = self._scan(query=search_body, index=index)
 
-    counter = 0
+    rawSearchCounter = 0
     total_hits = 0
     data = []
     if rawSearches:
 
       for hit in results:
+        rawSearchCounter += 1
+        if rawSearchCounter > limit:
+          break
         result = hit[0]
         counter = hit[1]
         total_hits = hit[2]

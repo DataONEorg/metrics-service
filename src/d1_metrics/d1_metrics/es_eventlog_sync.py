@@ -82,6 +82,12 @@ DATAONE_ADMIN_SUBJECTS = ["CN=urn:node:CN,DC=dataone,DC=org","CN=urn:node:CNUNM1
 
 DATAONE_ADMIN_SUBJECTS_TAG = "d1_admin_subject"
 
+DEFAULT_ELASTIC_CONFIG = {
+  "host":"localhost",
+  "port":9200,
+  "request_timeout":30,
+  }
+
 
 # ==========
 
@@ -97,7 +103,7 @@ def getESSyncLogger(level=logging.DEBUG, name=None):
     for handler in logger.handlers:
         logger.removeHandler(handler)
 
-    logger = logging.getLogger("es_eventlog_sync")
+    logger = logging.getLogger("es_eventlog")
     logger.setLevel(level)
     f_handler = logging.FileHandler('./es_eventlog.log')
     f_handler.setLevel(level)
@@ -121,7 +127,7 @@ def performRegularPortalChecks():
     Initiates the index update procedures for modified portals
     :return:
     """
-    logger = getESSyncLogger(name="es_eventlog_sync")
+    logger = getESSyncLogger(name="es_eventlog")
     t_start = time.time()
 
     logger.info("Beginning performRegularPortalChecks")
@@ -174,7 +180,7 @@ def querySolr(url="https://cn.dataone.org/cn/v2/query/solr/?", query_string="*:*
     :param rows:
     :return:
     """
-    logger = getESSyncLogger(name="es_eventlog_sync")
+    logger = getESSyncLogger(name="es_eventlog")
     if url is None:
         url = "https://cn.dataone.org/cn/v2/query/solr/?"
 
@@ -199,7 +205,7 @@ def getPortalMetadata(seriesId="", fl="seriesId,collectionQuery"):
     :return:
     """
 
-    logger = getESSyncLogger(name="es_eventlog_sync")
+    logger = getESSyncLogger(name="es_eventlog")
     query_string = '(seriesId:"' + seriesId + '" AND -obsoletedBy:* AND formatType:METADATA)'
     portal_metadata = {}
 
@@ -225,7 +231,7 @@ def handlePortalJob(seriesId=""):
     :param seriesId:
     :return:
     """
-    logger = getESSyncLogger(name="es_eventlog_sync")
+    logger = getESSyncLogger(name="es_eventlog")
     t_start = time.time()
 
     logger.info("Beginning performRegularPortalChecks")
@@ -289,7 +295,7 @@ def generatePortalHash(portalDatasetIdentifierFamily=[]):
     Generates hash for a given Portal from list of identifiers
     :return:
     """
-    logger = getESSyncLogger(name="es_eventlog_sync")
+    logger = getESSyncLogger(name="es_eventlog")
     logger.info("Generating portal collection hash")
     portalDatasetIdentifierFamily.sort()
     tuple_portalDatasetIdentifierFamily = tuple(portalDatasetIdentifierFamily)
@@ -305,7 +311,7 @@ def storePortalHash(seriesId="", hashVal=None, metrics_database=None, updateEntr
     Stores portal hash in the database
     :return:
     """
-    logger = getESSyncLogger(name="es_eventlog_sync")
+    logger = getESSyncLogger(name="es_eventlog")
     logger.info("Trying to store portal hash")
     if metrics_database is None:
         metrics_database = MetricsDatabase()
@@ -337,7 +343,7 @@ def retrievePortalHash(seriesId="", metrics_database=None):
     :param seriesId:
     :return:
     """
-    logger = getESSyncLogger(name="es_eventlog_sync")
+    logger = getESSyncLogger(name="es_eventlog")
     logger.info("Beginning hash retrieval job")
     if metrics_database is None:
         metrics_database = MetricsDatabase()
@@ -372,7 +378,7 @@ def getPIDRecords(PID):
     """
     metrics_elastic_search = MetricsElasticSearch()
     metrics_elastic_search.connect()
-    logger = getESSyncLogger(name="es_eventlog_sync")
+    logger = getESSyncLogger(name="es_eventlog")
 
     # set up the query
     query = {
@@ -389,7 +395,7 @@ def testSetUP():
     Temporary fixture to test the functionalities
     :return:
     """
-    logger = getESSyncLogger(name="es_eventlog_sync")
+    logger = getESSyncLogger(name="es_eventlog")
     test_fixture = {}
 
     # Just a random test pid from eventlog-0 index
@@ -405,7 +411,7 @@ def updateRecords(seriesId="", PID=""):
     Updates the record and writes it down to the ES index
     :return:
     """
-    logger = getESSyncLogger(name="es_eventlog_sync")
+    logger = getESSyncLogger(name="es_eventlog")
     metrics_elastic_search = MetricsElasticSearch()
     metrics_elastic_search.connect()
     eventSuccessCount = 0
@@ -461,7 +467,7 @@ def updateIndex(seriesId="", PID_List=None):
     :param seriesId:
     :return:
     """
-    logger = getESSyncLogger(name="es_eventlog_sync")
+    logger = getESSyncLogger(name="es_eventlog")
     t_start = time.time()
 
     # TODO include add or remove operation to make appropriate changes for that PID
@@ -532,7 +538,7 @@ def subjectFiltering():
 
     :return:
     """
-    logger = getESSyncLogger(name="es_eventlog_sync")
+    logger = getESSyncLogger(name="es_eventlog")
     data, total_hits = getAdminSubjects()
     updateTagsForAdminSubject(data, total_hits)
 
@@ -541,12 +547,9 @@ def getAdminSubjects():
     print("Getting the admin subjects")
     metrics_elastic_search = MetricsElasticSearch()
     metrics_elastic_search.connect()
-    logger = getESSyncLogger(name="es_eventlog_sync")
+    logger = getESSyncLogger(name="es_eventlog")
 
     query = [
-        {
-            "term": {"nodeId": "urn:node:ESS_DIVE"}
-        },
         {
             "exists": {
                 "field": "sessionId"
@@ -559,59 +562,75 @@ def getAdminSubjects():
         }
     ]
 
-    return metrics_elastic_search.getRawSearches(index="eventlog-*", q=query, limit=1)
+    return metrics_elastic_search.getRawSearches(index="eventlog-*", q=query, limit=1000000)
 
 
 def updateTagsForAdminSubject(data, total_hits):
-    logger = getESSyncLogger(name="es_eventlog_sync")
+    logger = getESSyncLogger(name="es_eventlog")
     t_start = time.time()
 
     # TODO include add or remove operation to make appropriate changes for that PID
 
-    def _update_tags(tag_label, read_event_entry):
-        logger = getESSyncLogger(name="es_eventlog_sync")
+    async def _update_tags(tag_label, read_event_entry, session):
+        logger = getESSyncLogger(name="es_eventlog")
         metrics_elastic_search = MetricsElasticSearch()
         metrics_elastic_search.connect()
         eventFailCount = 0
         eventSuccessCount = 0
         writeNotNeeded = 0
+        entry_id = None
+
+        if "_id" in read_event_entry:
+            entry_id = read_event_entry["_id"]
 
         try:
             tags_array = []
 
+            if entry_id is None:
+                logger.error("Cannot update entry without ID")
+                eventFailCount += 1
+
             if "_index" in read_event_entry:
                 read_event_entry_index = read_event_entry["_index"]
             else:
-                logger.error("Cannot update entry: " + read_event_entry["_id"])
+                logger.error("Cannot update entry: " + entry_id)
                 eventFailCount += 1
 
+
+            # set up the URL
+            index_update_url = "http://localhost:9200/%s/_doc/%s/_update" % (read_event_entry_index, entry_id)
+
+            headers = {}
+            headers["Content-Type"] = "application/json"
+
             if (tag_label is not None):
-                if "tags" in read_event_entry["_source"]:
-                    tags_array = read_event_entry["_source"]["tags"]
-                else:
-                    read_event_entry["_source"]["tags"] = []
 
-                if tag_label not in tags_array:
-                    tags_array.append(tag_label)
-                    read_event_entry["_source"]["tags"].extend(tags_array)
+                index_update_body = {
+                    "script": {
+                        "source": "ctx._source.tags.add(params.tag)",
+                        "lang": "painless",
+                        "params": {
+                            "tag": tag_label
+                        }
+                    }
+                }
 
-                    updateStat = metrics_elastic_search.updateEvents(read_event_entry_index, read_event_entry)
-                    if updateStat:
+                async with session.post(index_update_url, data=json.dumps(index_update_body), headers=headers) as response:
+                    response_text = await response.text()
+                    if response.status == 200:
                         eventSuccessCount += 1
-                    else:
-                        eventFailCount += 1
-                else:
-                    writeNotNeeded += 1
+
         except Exception as e:
             eventFailCount += 1
             logger.error(e)
-            logger.info("Error occured here: " + json.dumps(read_event_entry, indent=2))
+            logger.info("Error occured for entry id: " + str(entry_id))
+            logger.info(eventSuccessCount + " " + eventFailCount + " " + writeNotNeeded)
         return eventSuccessCount, eventFailCount, writeNotNeeded
 
     async def _bound_update_tags(sem, tag_label, event, session):
         # Getter function with semaphore.
         async with sem:
-            await _update_tags(tag_label, event)
+            await _update_tags(tag_label, event, session)
 
     # Async event updates
     async def _work(data):
@@ -650,7 +669,7 @@ def updateTagsForAdminSubject(data, total_hits):
     logger.debug("elapsed:%fsec", time.time() - t_start)
     t_delta = time.time() - t_start
 
-    logger.info("Updated index for ESS_DIVE" )
+    logger.info("Updated index for DATAONE" )
     logger.info('updateIndex:t1=%.4f', t_delta)
 
     return
