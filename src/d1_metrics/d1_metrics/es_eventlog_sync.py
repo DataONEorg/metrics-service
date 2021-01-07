@@ -280,6 +280,7 @@ def handlePortalJob(seriesId=""):
 
     # update if required; else continue
     if(portalIndexUpdateRequired):
+        updateCitationsDatabase(seriesId=seriesId, PID_List=portal_DIF)
         updateIndex(seriesId=seriesId, PID_List=portal_DIF)
         storePortalHash(seriesId=seriesId,hashVal=portal_metadata["hash"], updateEntry=updateHash)
 
@@ -288,6 +289,96 @@ def handlePortalJob(seriesId=""):
     logger.info('handlePortalJob:t1=%.4f', t_delta)
 
     return True
+
+
+def updateCitationsDatabase(seriesId, PID_List):
+    """
+    Updates the citations database table with the series identifier
+    :param seriesId:
+    :param PID_List:
+    :return:
+    """
+    logger = getESSyncLogger(name="es_eventlog")
+    t_start = time.time()
+
+    logger.info("Beginning citations database table udpates")
+
+    # establish a connection
+    metrics_database = MetricsDatabase()
+    metrics_database.connect()
+    csr = metrics_database.getCursor()
+
+    # get the list of all identifiers that have citations
+    sql = 'SELECT target_id FROM citations;'
+    try:
+        csr.execute(sql)
+
+        if (csr.rowcount > 0):
+            rows = csr.fetchall()
+            citation_pid_set = set()
+            for cit_tup in rows:
+                citation_pid_set.add(cit_tup[0])
+        logger.debug("retrieved citations successfully from the DB")
+
+    except psycopg2.DatabaseError as e:
+        message = 'Database error! ' + str(e)
+        logger.exception('Operational error!\n{0}')
+        logger.exception(e)
+    except psycopg2.OperationalError as e:
+        logger.exception('Operational error!\n{0}')
+        logger.exception(e)
+    finally:
+        logger.info("Commiting changes to DB")
+        metrics_database.conn.commit()
+
+    # check if the identifier exist in the PID_list
+    portal_citation_identifiers = set()
+    for identifers in citation_pid_set:
+        for portal_PID in PID_List:
+            if identifers in portal_PID:
+                portal_citation_identifiers.add(identifers)
+
+    # store the seriesID for that identifier
+    updateCount = 0
+    for identifier in portal_citation_identifiers:
+        try:
+            # append only if the given seriesId does not already exist in the 'portal_id' array
+            sql = "UPDATE citation_metadata SET portal_id = (select array_agg(distinct e) from unnest(portal_id || '{%s}') e) where not portal_id @> '{%s}' AND target_id = '%s'; " % (seriesId, seriesId, identifier)
+
+            csr.execute(sql)
+            updateCount += 1
+
+        except psycopg2.DatabaseError as e:
+            message = 'Database error! ' + str(e)
+            logger.exception('Operational error!\n{0}')
+            logger.exception(e)
+        except psycopg2.OperationalError as e:
+            logger.exception('Operational error!\n{0}')
+            logger.exception(e)
+        finally:
+            logger.info("Commiting changes to DB")
+            # commit
+            metrics_database.conn.commit()
+    logger.info("Successfully updated %s the citations pids for seriesId : %s" % (updateCount, seriesId))
+
+    pass
+
+
+def testUpdateCitationsDatabase(seriesId, PID_List):
+    """
+    Test the updates to the citations database table with the series identifier
+    :param seriesId:
+    :param PID_List:
+    :return:
+    """
+    logger = getESSyncLogger(name="es_eventlog")
+    t_start = time.time()
+
+    logger.info("Beginning testing citation indexing for portal seriesId")
+
+    # get the total count and list of all identifiers that have this seriesId
+
+    pass
 
 
 def generatePortalHash(portalDatasetIdentifierFamily=[]):
