@@ -1483,11 +1483,11 @@ class MetricsReader:
         :return:
         """
         t_0 = time.time()
-        self.logger.debug("enter getRepositoryCitationPIDs")
+        self.logger.debug("enter getPortalCitationPIDs")
         metrics_database = MetricsDatabase()
         metrics_database.connect()
         csr = metrics_database.getCursor()
-        sql = 'SELECT target_id FROM citation_metadata WHERE \'' + seriesId + '\' = ANY (portal_id);'
+        sql = "SELECT target_id FROM citation_metadata WHERE '" + seriesId + "' = ANY (portal_id);"
 
         results = []
         citationCount = 0
@@ -1500,7 +1500,7 @@ class MetricsReader:
             print('Database error!\n{0}', e)
         finally:
             pass
-        self.logger.debug("exit getRepositoryCitationPIDs, elapsed=%fsec", time.time() - t_0)
+        self.logger.debug("exit getPortalCitationPIDs, elapsed=%fsec", time.time() - t_0)
         return (results)
 
 
