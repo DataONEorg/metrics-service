@@ -452,6 +452,10 @@ class MetricsElasticSearch(object):
       if (isinstance(q, dict) ):
         search_body["query"]["bool"]["must"].append(q)
 
+    if must_not_q is not None:
+      if (isinstance(must_not_q, dict)):
+        search_body["query"]["bool"]["must_not"].append(must_not_q)
+
     self._L.info("query=" + json.dumps(search_body))
     try:
       self._L.info("retrieving events...")

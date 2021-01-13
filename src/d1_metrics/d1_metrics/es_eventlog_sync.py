@@ -134,6 +134,11 @@ def performRegularPortalChecks():
 
     # TODO : replace with solr to get the list of portals that needs update
     portalDict = performRegularPortalCollectionQueryChecks()
+
+    # Test set up, not needed
+    # data= testSetUP()
+    # portalDict = data["portalIdentifiers"]
+
     logger.info("Loaded portals from Solr")
 
     logger.info("Beginning handle Portal Job")
@@ -342,11 +347,25 @@ def updateCitationsDatabase(seriesId, PID_List):
     updateCount = 0
     for identifier in portal_citation_identifiers:
         try:
-            # append only if the given seriesId does not already exist in the 'portal_id' array
-            sql = "UPDATE citation_metadata SET portal_id = (select array_agg(distinct e) from unnest(portal_id || '{%s}') e) where not portal_id @> '{%s}' AND target_id = '%s'; " % (seriesId, seriesId, identifier)
+
+            sqlPortalId = "SELECT portal_id FROM citation_metadata WHERE target_id = '" + identifier + "';"
+            csr.execute(sqlPortalId)
+            rows = csr.fetchall()
+
+            if(not rows or rows[0][0] is None):
+                sql = "UPDATE citation_metadata SET portal_id = '{%s}' WHERE target_id = '%s';" % (seriesId, identifier)
+            else:
+                # append only if the given seriesId does not already exist in the 'portal_id' array
+                sql = "UPDATE citation_metadata SET portal_id = (select array_agg(distinct e) from unnest(portal_id || '{%s}') e) where not portal_id @> '{%s}' AND target_id = '%s'; " % (seriesId, seriesId, identifier)
 
             csr.execute(sql)
-            updateCount += 1
+            csrUpdateCount = csr.rowcount
+            updateCount += csrUpdateCount
+
+            if csrUpdateCount:
+                logger.info("Added citation for target id - %s with series ID - %s " % (identifier, seriesId    ))
+            else:
+                logger.info("Target id - %s already has series ID - %s " % (identifier, seriesId))
 
         except psycopg2.DatabaseError as e:
             message = 'Database error! ' + str(e)
@@ -355,8 +374,11 @@ def updateCitationsDatabase(seriesId, PID_List):
         except psycopg2.OperationalError as e:
             logger.exception('Operational error!\n{0}')
             logger.exception(e)
+        except Exception as e:
+            logger.exception('Other error!\n{0}')
+            logger.exception(e)
         finally:
-            logger.info("Commiting changes to DB")
+            logger.debug("Commiting changes to DB")
             # commit
             metrics_database.conn.commit()
     logger.info("Successfully updated %s the citations pids for seriesId : %s" % (updateCount, seriesId))
@@ -366,7 +388,7 @@ def updateCitationsDatabase(seriesId, PID_List):
 
 def testUpdateCitationsDatabase(seriesId, PID_List):
     """
-    Test the updates to the citations database table with the series identifier
+    Updates the citations database table with the series identifier
     :param seriesId:
     :param PID_List:
     :return:
@@ -462,7 +484,7 @@ def retrievePortalHash(seriesId="", metrics_database=None):
     return portal_hash
 
 
-def getPIDRecords(PID):
+def getPIDRecords(PID, seriesId):
     """
     Queries ES and retrieves records from the index for a given PID
     :return:
@@ -477,8 +499,15 @@ def getPIDRecords(PID):
             "pid.key": PID
         }
     }
+    must_not_query = {
+        "terms": {
+            "portalIdentifier.keyword": [
+                seriesId
+            ]
+        }
+    }
 
-    return metrics_elastic_search.getRawSearches(index="eventlog-*", q=query, limit=9999999)
+    return metrics_elastic_search.getRawSearches(index="eventlog-*", q=query, must_not_q = must_not_query, limit=9999999)
 
 
 def testSetUP():
@@ -492,12 +521,12 @@ def testSetUP():
     # Just a random test pid from eventlog-0 index
     test_fixture["PID"] = "aekos.org.au/collection/sa.gov.au/bdbsa_veg/survey_88.20160201"
     test_fixture["portalIdentifiers"] = {}
-    test_fixture["portalIdentifiers"]["DBO"] = "urn:uuid:8cdb22c6-cb33-4553-93ca-acb6f5d53ee4"
+    test_fixture["portalIdentifiers"]["icecaps"] = "urn:uuid:68ad3b4e-340e-4347-b04a-8daf65b5c65d"
     # test_fixture["portalIdentifiers"]["CALM"] = "urn:uuid:77fc14cc-b69d-4e21-8c5a-1e9cdc79ad4b"
     return test_fixture
 
 
-def updateRecords(seriesId="", PID=""):
+async def updateRecords(seriesId="", PID="", session=ClientSession()):
     """
     Updates the record and writes it down to the ES index
     :return:
@@ -509,8 +538,25 @@ def updateRecords(seriesId="", PID=""):
     eventFailCount = 0
     writeNotNeeded = 0
 
-    data = getPIDRecords(PID)
+    data = getPIDRecords(PID, seriesId)
     total_hits = 0
+
+    index_update_seriesId = {
+        "script": {
+            "source": "ctx._source.portalIdentifier.add(params.seriesId)",
+            "lang": "painless",
+            "params": {
+                "seriesId": seriesId
+            }
+        }
+    }
+
+    index_add_seriesId = {
+        "script": "ctx._source.portalIdentifier = [\"%s\"]" % (seriesId)
+    }
+
+    headers = {}
+    headers["Content-Type"] = "application/json"
 
     if data is not None:
         total_hits = data[1]
@@ -519,35 +565,39 @@ def updateRecords(seriesId="", PID=""):
 
         for read_event_entry in data[0]:
             try:
-                portalIdentifierArray = []
+                if "_id" in read_event_entry:
+                    entry_id = read_event_entry["_id"]
 
                 if "_index" in read_event_entry:
                     read_event_entry_index = read_event_entry["_index"]
                 else:
-                    logger.error("Cannot update entry: " + read_event_entry["_id"])
+                    logger.error("Cannot update entry: " + entry_id)
                     eventFailCount += 1
                     continue
 
-                if ((len(seriesId) > 0) and seriesId is not None ):
-                    if "portalIdentifier" in read_event_entry["_source"]:
-                        portalIdentifierArray = read_event_entry["_source"]["portalIdentifier"]
-                    else:
-                        read_event_entry["_source"]["portalIdentifier"] = []
+                index_update_url = "http://localhost:9200/%s/_doc/%s/_update" % (read_event_entry_index, entry_id)
+                if "portalIdentifier" in read_event_entry["_source"]:
+                    update_body = index_update_seriesId
+                else:
+                    update_body = index_add_seriesId
 
-                    if seriesId not in portalIdentifierArray:
-                        portalIdentifierArray.append(seriesId)
-                        read_event_entry["_source"]["portalIdentifier"].extend(portalIdentifierArray)
+                if ((len(seriesId) > 0) and seriesId is not None):
 
-                        updateStat = metrics_elastic_search.updateEvents(read_event_entry_index, read_event_entry)
-                        if updateStat:
+                    async with session.post(index_update_url, data=json.dumps(update_body),
+                                            headers=headers, timeout=30) as response:
+                        response_text = await response.text()
+                        if response.status == 200:
                             eventSuccessCount += 1
                         else:
                             eventFailCount += 1
-                    else:
-                        writeNotNeeded += 1
+
+                else:
+                    writeNotNeeded += 1
+            except TimeoutError as e:
+                logger.error("Timeout Error for entry_ID : " + entry_id)
             except Exception as e:
-                logger.error(e)
-                logger.info("Error occured here: " + json.dumps(read_event_entry, indent=2))
+                logger.error("Error while updating index for entry ID " + entry_id)
+                logger.error(json.dumps(update_body))
 
     return total_hits, eventSuccessCount, eventFailCount, writeNotNeeded
 
@@ -564,8 +614,10 @@ def updateIndex(seriesId="", PID_List=None):
     # TODO include add or remove operation to make appropriate changes for that PID
 
     totalCount = 0
+    global timeoutErrorCount
+    timeoutErrorCount = 0
     PID_List_iteration_count = 0
-    if( (seriesId is not None) and (PID_List is not None)):
+    if ((seriesId is not None) and (PID_List is not None)):
         logger.info("Updating index for " + str(seriesId))
         logger.info("Total PIDs to update:" + str(len(PID_List)))
 
@@ -573,20 +625,37 @@ def updateIndex(seriesId="", PID_List=None):
 
         # TODO check for PIDs that need updating
 
+
+        async def _bound_portal_updates(sem, seriesId, PID, session):
+            # Getter function with semaphore.
+            async with sem:
+                total_hits, eventSuccessCount, eventFailCount, writeNotNeeded = await updateRecords(seriesId, PID, session)
+
+            return total_hits, eventSuccessCount, eventFailCount, writeNotNeeded
+
         # Async PID updates
         async def _work(seriesId, PID_List):
             logger.info("Beginning async work")
-            with concurrent.futures.ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as executor:
+
+            # create instance of Semaphore
+            sem = asyncio.Semaphore(1000)
+
+            # Create client session that will ensure we dont open new connection
+            # per each request.
+            async with ClientSession() as session:
                 PID_List_iteration_count = 0
                 totalWorkCount = 0
                 loop = asyncio.get_event_loop()
                 tasks = []
 
                 for PID in PID_List:
-                    tasks.append(loop.run_in_executor(executor, updateRecords, seriesId, PID))
+                    task = asyncio.ensure_future(_bound_portal_updates(sem, seriesId, PID, session))
+                    tasks.append(task)
 
                 logger.info("Entire PID_List tasks initialized")
-                for resp in await asyncio.gather(*tasks):
+
+                responses = asyncio.gather(*tasks)
+                for resp in await responses:
                     # Logging and status tracking
                     PID_List_iteration_count += 1
                     if (PID_List_iteration_count % 100 == 0):
@@ -686,7 +755,6 @@ def updateTagsForAdminSubject(data, total_hits):
             else:
                 logger.error("Cannot update entry: " + entry_id)
                 eventFailCount += 1
-
 
             # set up the URL
             index_update_url = "http://localhost:9200/%s/_doc/%s/_update" % (read_event_entry_index, entry_id)
@@ -804,14 +872,16 @@ def main():
 
     # updateRecords()
     # getPortalMetadata(seriesId="urn:uuid:8cdb22c6-cb33-4553-93ca-acb6f5d53ee4")
-    # performRegularPortalChecks()
+    performRegularPortalChecks()
     # performRegularPortalCollectionQueryChecks()
 
     # print(json.dumps(getPIDRecords(PID="doi: 10.18739/A2F320"), indent=2))
 
     # storePortalHash(seriesId="urn:uuid:8cdb22c6-cb33-4553-93ca-acb6f5d53ee4", hashVal="8914987b3afe11cad14010e417e37111")
     # print(retrievePortalHash(seriesId="urn:uuid:8cdb22c6-cb33-4553-93ca-acb6f5d53ee4"))
-    subjectFiltering()
+    # subjectFiltering()
+
+    # updateCitationsDatabase(seriesId=None, PID_List=None)
     return
 
 
