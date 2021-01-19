@@ -60,12 +60,8 @@ class MetricsReader:
         current_time = datetime.now()
         tomorrow = current_time + timedelta(1)
 
-        # Setting the GMT offset to get the local time in Pacific
-        # Note: Day Light Savings time difference is not set
-        midnight = datetime(year=tomorrow.year, month=tomorrow.month, day=tomorrow.day, hour=7, minute=0, second=0)
-        secs = ((midnight - current_time).seconds)
-        
-        expiry_time = datetime.now() + timedelta(seconds=secs)
+        # Setting up the expiry time
+        expiry_time = datetime(year=tomorrow.year, month=tomorrow.month, day=tomorrow.day, hour=0, minute=0, second=0)
 
         query_param = urlparse(unquote(req.url))
 
