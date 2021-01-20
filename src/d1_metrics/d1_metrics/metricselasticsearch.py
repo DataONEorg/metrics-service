@@ -277,9 +277,9 @@ class MetricsElasticSearch(object):
     """
     self._L.info("Executing: %s", json.dumps(search_body, indent=2))
     if request_timeout:
-      results = self._scan(query=search_body, index=index, request_timeout=request_timeout)
+      results = self._scan(query=search_body, scroll='1h', index=index, request_timeout=request_timeout)
     else:
-      results = self._scan(query=search_body, index=index)
+      results = self._scan(query=search_body, scroll='1h', index=index)
 
     rawSearchCounter = 0
     total_hits = 0

@@ -665,7 +665,7 @@ def updateIndex(seriesId="", PID_List=None):
             logger.info("Beginning async work")
 
             # create instance of Semaphore
-            sem = asyncio.Semaphore(10)
+            sem = asyncio.Semaphore(5)
 
             # Create client session that will ensure we dont open new connection
             # per each request.
