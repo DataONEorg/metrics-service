@@ -116,19 +116,12 @@ def getESSyncLogger(level=logging.DEBUG, name=None):
     return logger
 
 
-def getModifiedPortals():
-    """
-    Returns list of portals that were modified since last check
-    :return:
-    """
-    pass
-
-
-def performRegularPortalChecks():
+def performRegularPortalChecks(mode="regular"):
     """
     Queries Solr to get the list of portals that were modified
     Initiates the index update procedures for modified portals
-    :return:
+    :param: mode Indicates the mode in which the jobs will be executed
+    :return: None
     """
     logger = getESSyncLogger(name="es_eventlog")
     t_start = time.time()
@@ -137,7 +130,7 @@ def performRegularPortalChecks():
 
     # TODO : replace with solr to get the list of portals that needs update
     portalDict = OrderedDict()
-    portalDict = performRegularPortalCollectionQueryChecks()
+    portalDict = performRegularPortalCollectionQueryChecks(mode=mode)
 
     # Test set up, not needed
     # data= testSetUP()
@@ -156,18 +149,24 @@ def performRegularPortalChecks():
     return
 
 
-def performRegularPortalCollectionQueryChecks(fields=None):
+def performRegularPortalCollectionQueryChecks(fields=None, mode=None):
     """
     Checks for newly added datasets that satisfy the collection query
     associated with this portal
+    :param: fields
+    :param: mode
     :return:
     """
 
-    # TODO Add time component
-
     # Set Portal objects retieval query
-    formatId = "https://purl.dataone.org/portals-1.0.0"
-    queryString = "label:* AND -obsoletedBy:* AND formatId:\"" + formatId + "\""
+    formatId = "portals"
+    queryString = "label:* AND -obsoletedBy:* AND formatId: *" + formatId + "*"
+
+    # Adding time component
+    if mode is not None and mode == "new":
+        queryDate = (datetime.datetime.utcnow() - BATCH_TDELTA_PERIOD)
+        dateCreated = queryDate.strftime("%Y-%m-%dT%H:%M:%SZ")
+        queryString += " AND dateUploaded:[%s TO NOW]" % (dateCreated)
 
     if fields is None:
         fields = "seriesId, label, id, collectionQuery"
@@ -192,10 +191,12 @@ def performRegularPortalCollectionQueryChecks(fields=None):
 
 def querySolr(url="https://cn.dataone.org/cn/v2/query/solr/?", query_string="*:*", wt="json", rows="1", fl=''):
     """
-
+    Client to query solr
     :param url:
+    :param query_string:
     :param wt:
     :param rows:
+    :param fl:
     :return:
     """
     logger = getESSyncLogger(name="es_eventlog")
@@ -264,7 +265,7 @@ def handlePortalJob(seriesId=""):
     logger.info(seriesId)
 
     portal_metadata = getPortalMetadata(seriesId=seriesId)
-    portalIndexUpdateRequired = True
+    portalIndexUpdateRequired = False
 
     logger.info(portal_metadata)
 
@@ -299,7 +300,12 @@ def handlePortalJob(seriesId=""):
     # update if required; else continue
     if(portalIndexUpdateRequired):
         updateCitationsDatabase(seriesId=seriesId, PID_List=portal_DIF)
-        updateIndex(seriesId=seriesId, PID_List=portal_DIF)
+
+        logger.info("Running expunge job for " + seriesId)
+        updateIndex(seriesId=seriesId, PID_List=updatePortalEpungePIDs(seriesId, portal_DIF), operation="remove")
+
+        logger.info("Running update job for " + seriesId)
+        updateIndex(seriesId=seriesId, PID_List=portal_DIF, operation="add")
         storePortalHash(seriesId=seriesId,hashVal=portal_metadata["hash"], updateEntry=updateHash)
 
     t_delta = time.time() - t_start
@@ -307,6 +313,50 @@ def handlePortalJob(seriesId=""):
     logger.info('handlePortalJob:t1=%.4f', t_delta)
 
     return True
+
+
+def updatePortalEpungePIDs(seriesId, portal_DIF):
+    """
+    Removes the seriesID from events for PIDs that are no longer part of the portal
+    :param seriesId:
+    :param portal_DIF:
+    :return:
+    """
+    epunge_list = []
+    current_portal_PIDs = []
+    logger = getESSyncLogger(name="es_eventlog")
+    t_start = time.time()
+
+    logger.info("Beginning updatePortalEpungePIDs")
+
+    metrics_elastic_search = MetricsElasticSearch()
+    metrics_elastic_search.connect()
+
+    # set up the query
+    query = {
+        "term": {
+            "portalIdentifier.keyword": seriesId
+        },
+    }
+
+    try:
+        results =  metrics_elastic_search.getSearches(index="eventlog-*", q=query, fields="pid", limit=9999999)
+        if results is not None:
+            current_portal_PIDs = results[0]
+
+    except Exception as e:
+        logger.error("Exception occured while retrieving expunge PIDs")
+
+    for id in current_portal_PIDs:
+        if id not in portal_DIF:
+            epunge_list.append(id)
+
+    t_delta = time.time() - t_start
+    logger.info("Completed check for " + seriesId)
+    logger.info("Length of expunge list " + str(len(epunge_list)))
+    logger.info('updatePortalEpungePIDs:t1=%.4f', t_delta)
+
+    return epunge_list
 
 
 def updateCitationsDatabase(seriesId, PID_List):
@@ -465,7 +515,7 @@ def storePortalHash(seriesId="", hashVal=None, metrics_database=None, updateEntr
 
 def retrievePortalHash(seriesId="", metrics_database=None):
     """
-    Retrieves portal hash from the
+    Retrieves portal hash from the database
     :param seriesId:
     :return:
     """
@@ -497,7 +547,7 @@ def retrievePortalHash(seriesId="", metrics_database=None):
     return portal_hash
 
 
-def getPIDRecords(pid_sub_list, seriesId):
+def getPIDRecords(pid_sub_list, seriesId, operation):
     """
     Queries ES and retrieves records from the index for a given PID
     :return:
@@ -512,15 +562,18 @@ def getPIDRecords(pid_sub_list, seriesId):
             "pid.key": pid_sub_list
         }
     }
-    must_not_query = {
-        "terms": {
-            "portalIdentifier.keyword": [
-                seriesId
-            ]
-        }
-    }
 
-    return metrics_elastic_search.getRawSearches(index="eventlog-*", q=query, must_not_q = must_not_query, limit=9999999)
+    must_not_query= None
+    if operation == "add":
+        must_not_query = {
+            "terms": {
+                "portalIdentifier.keyword": [
+                    seriesId
+                ]
+            }
+        }
+
+    return metrics_elastic_search.getRawSearches(index="eventlog-*", q=query, must_not_q=must_not_query, limit=9999999)
 
 
 def testSetUP():
@@ -538,7 +591,7 @@ def testSetUP():
     return test_fixture
 
 
-async def updateRecords(seriesId="", pid_sub_list=[], session=ClientSession()):
+async def updateRecords(seriesId="", pid_sub_list=[], session=ClientSession(), operation="add"):
     """
     Updates the record and writes it down to the ES index
     :return:
@@ -549,7 +602,7 @@ async def updateRecords(seriesId="", pid_sub_list=[], session=ClientSession()):
     eventSuccessCount = 0
     eventFailCount = 0
 
-    data = getPIDRecords(pid_sub_list, seriesId)
+    data = getPIDRecords(pid_sub_list, seriesId, operation)
     total_hits = 0
 
     index_update_seriesId = {
@@ -564,6 +617,16 @@ async def updateRecords(seriesId="", pid_sub_list=[], session=ClientSession()):
 
     index_add_seriesId = {
         "script": "ctx._source.portalIdentifier = ['%s']" % (seriesId)
+    }
+
+    index_remove_seriesId = {
+        "script": {
+            "source": "if (ctx._source.portalIdentifier.contains(params.tag)) { ctx._source.portalIdentifier.remove(ctx._source.portalIdentifier.indexOf(params.tag)) }",
+            "lang": "painless",
+            "params": {
+                "tag": seriesId
+            }
+        }
     }
 
     headers = {}
@@ -599,10 +662,13 @@ async def updateRecords(seriesId="", pid_sub_list=[], session=ClientSession()):
                     bulk_update_body += json.dumps(update_body_syntax) + "\n"
 
                     index_update_url = "http://localhost:9200/_bulk"
-                    if "portalIdentifier" in read_event_entry["_source"]:
-                        bulk_update_body += json.dumps(index_update_seriesId) + "\n"
-                    else:
-                        bulk_update_body += json.dumps(index_add_seriesId) + "\n"
+                    if operation == "add":
+                        if "portalIdentifier" in read_event_entry["_source"]:
+                            bulk_update_body += json.dumps(index_update_seriesId) + "\n"
+                        else:
+                            bulk_update_body += json.dumps(index_add_seriesId) + "\n"
+                    elif operation == "remove":
+                        bulk_update_body += json.dumps(index_remove_seriesId) + "\n"
 
                 if ((len(seriesId) > 0) and seriesId is not None and bulk_update_body is not None):
                     bulk_update_body += "\n"
@@ -623,22 +689,21 @@ async def updateRecords(seriesId="", pid_sub_list=[], session=ClientSession()):
             except TimeoutError as e:
                 logger.error("Timeout Error for entry_ID : " + entry_id)
             except Exception as e:
-                pass
-
+                logger.error("Exception occured for entry_ID : " + entry_id)
 
     return total_hits, eventSuccessCount
 
 
-def updateIndex(seriesId="", PID_List=None):
+def updateIndex(seriesId="", PID_List=None, operation="add"):
     """
     Updates the index for the given series ID
-    :param seriesId:
+    :param seriesId: portal Identifier to index
+    :param PID_List: pids that need indexing
+    :param operation: type of indexing operation
     :return:
     """
     logger = getESSyncLogger(name="es_eventlog")
     t_start = time.time()
-
-    # TODO include add or remove operation to make appropriate changes for that PID
 
     totalCount = 0
     global timeoutErrorCount
@@ -648,20 +713,15 @@ def updateIndex(seriesId="", PID_List=None):
         logger.info("Updating index for " + str(seriesId))
         logger.info("Total PIDs to update:" + str(len(PID_List)))
 
-        # TODO get the existing list
-
-        # TODO check for PIDs that need updating
-
-
-        async def _bound_portal_updates(sem, seriesId, pid_sub_list, session):
+        async def _bound_portal_updates(sem, seriesId, pid_sub_list, session, operation):
             # Getter function with semaphore.
             async with sem:
-                total_hits, eventSuccessCount = await updateRecords(seriesId, pid_sub_list, session)
+                total_hits, eventSuccessCount = await updateRecords(seriesId, pid_sub_list, session, operation)
 
             return total_hits, eventSuccessCount
 
         # Async PID updates
-        async def _work(seriesId, PID_List, loop):
+        async def _work(seriesId, PID_List, operation, loop):
             logger.info("Beginning async work")
 
             # create instance of Semaphore
@@ -676,7 +736,7 @@ def updateIndex(seriesId="", PID_List=None):
 
                 for pid_index in range(0,len(PID_List), 1000):
                     pid_sub_list = PID_List[pid_index:pid_index+1000]
-                    task = asyncio.ensure_future(_bound_portal_updates(sem, seriesId, pid_sub_list, session))
+                    task = asyncio.ensure_future(_bound_portal_updates(sem, seriesId, pid_sub_list, session, operation))
                     tasks.append(task)
 
                 logger.info("Entire PID_List tasks initialized")
@@ -703,7 +763,7 @@ def updateIndex(seriesId="", PID_List=None):
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
 
-        future = asyncio.ensure_future(_work(seriesId, PID_List, loop))
+        future = asyncio.ensure_future(_work(seriesId, PID_List, operation, loop))
         loop.run_until_complete(future)
         logger.debug("elapsed:%fsec", time.time() - t_start)
 
@@ -721,7 +781,7 @@ def updateIndex(seriesId="", PID_List=None):
 
 def subjectFiltering():
     """
-
+    Filters the results based on the predefined admin subjects
     :return:
     """
     logger = getESSyncLogger(name="es_eventlog")
@@ -730,6 +790,10 @@ def subjectFiltering():
 
 
 def getAdminSubjects():
+    """
+    Returns admin tag from the ES index
+    :return:
+    """
     metrics_elastic_search = MetricsElasticSearch()
     metrics_elastic_search.connect()
     logger = getESSyncLogger(name="es_eventlog")
@@ -754,8 +818,6 @@ def getAdminSubjects():
 def updateTagsForAdminSubject(data, total_hits):
     logger = getESSyncLogger(name="es_eventlog")
     t_start = time.time()
-
-    # TODO include add or remove operation to make appropriate changes for that PID
 
     async def _update_tags(tag_label, read_event_entry, session):
         logger = getESSyncLogger(name="es_eventlog")
@@ -879,6 +941,10 @@ def main():
         "-E", "--enddate", default=None, help="End date. If not set then now is used."
     )
 
+    parser.add_argument(
+        "-m", "--mode", default="regular", help="Arg to indicate the type of run. eg. nightly job"
+    )
+
     args = parser.parse_args()
 
     # Setup logging verbosity
@@ -886,6 +952,7 @@ def main():
     level = levels[min(len(levels) - 1, args.log_level)]
 
     end_date = args.enddate
+    mode = args.mode
 
     if end_date is None:
         # end_date = start_date + BATCH_TDELTA_PERIOD
@@ -893,13 +960,13 @@ def main():
     else:
         end_date = datetime.datetime.strptime(end_date, "%Y-%m-%dT%H:%M:%S")
 
-    # updateRecords()
-    # getPortalMetadata(seriesId="urn:uuid:8cdb22c6-cb33-4553-93ca-acb6f5d53ee4")
-    performRegularPortalChecks()
-    # performRegularPortalCollectionQueryChecks()
-    # storePortalHash(seriesId="urn:uuid:8cdb22c6-cb33-4553-93ca-acb6f5d53ee4", hashVal="8914987b3afe11cad14010e417e37111")
-    # subjectFiltering()
-    # updateCitationsDatabase(seriesId=None, PID_List=None)
+    if mode is not None and (mode == "regular" or mode == "new"):
+        if mode == "regular":
+            print("Running regular job")
+        if mode == "new":
+            print("Running new job")
+        performRegularPortalChecks(mode=mode)
+
     return
 
 

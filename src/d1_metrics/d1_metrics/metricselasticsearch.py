@@ -262,7 +262,6 @@ class MetricsElasticSearch(object):
       if date_end is not None:
         date_filter["range"][MetricsElasticSearch.F_DATELOGGED]["lte"] = date_end.isoformat()
       search_body["query"]["bool"]["filter"] = date_filter
-    print(search_body)
     return search_body
 
 
