@@ -647,13 +647,36 @@ class MetricsDatabase(object):
                     if "given" in i:
                         author.append((i["given"] + " " + i["family"]))
                 doi_metadata["origin"] =  author
-                doi_metadata["title"] = metadata["message"]["title"][0]
-                doi_metadata["publisher"] = metadata["message"]["publisher"]
+
+                if "title" in metadata["message"]:
+                    doi_metadata["title"] = metadata["message"]["title"][0]
+                else:
+                    doi_metadata["title"] = 'NULL'
+
+                if "publisher" in metadata["message"]:
+                    doi_metadata["publisher"] = metadata["message"]["publisher"]
+                else:
+                    doi_metadata["publisher"] = 'NULL'
+
                 doi_metadata["year_of_publishing"] = str(metadata["message"]["created"]["date-parts"][0][0])
+
                 doi_metadata["source_url"] = "https://doi.org/" + doi
-                doi_metadata["journal"] = metadata["message"]["container-title"][0]
-                doi_metadata["volume"] = metadata["message"]["volume"]
-                doi_metadata["page"] = metadata["message"]["page"]
+
+                if "container-title" in metadata["message"]:
+                    doi_metadata["journal"] = metadata["message"]["container-title"][0]
+                else:
+                    doi_metadata["journal"] = 'NULL'
+
+                if "volume" in metadata["message"]:
+                    doi_metadata["volume"] = metadata["message"]["volume"]
+                else:
+                    doi_metadata["volume"] = 'NULL'
+
+                if "page" in metadata["message"]:
+                    doi_metadata["page"] = metadata["message"]["page"]
+                else:
+                    doi_metadata["page"] = 'NULL'
+
                 doi_metadata["link_publication_date"] = datetime.today().strftime('%Y-%m-%d')
 
         except Exception as e:
@@ -690,7 +713,7 @@ class MetricsDatabase(object):
 
         for citation_object in citations_data:
             self._L.info("\n")
-            self._L.info("Executing for", citation_object)
+            self._L.info("Executing for " + json.dumps(citation_object))
 
             results = {}
             metadata = citation_object
@@ -710,16 +733,18 @@ class MetricsDatabase(object):
                     values.append(citation_object["volume"].replace("'", r"''"))
                     values.append(citation_object["page"].replace("'", r"''"))
                     values.append(str(citation_object["year_of_publishing"]))
-                    if ["reporter"] in citation_object:
+                    if "reporter" in citation_object:
                         values.append(citation_object["reporter"].replace("'", r"''"))
                     else:
                         values.append('NULL')
-                    if ["relation_type"] in citation_object:
+                    if "relation_type" in citation_object:
                         values.append(citation_object["relation_type"].replace("'", r"''"))
                     else:
                         values.append('NULL')
-                except:
-                    self._L.exception("Object missing information - " + citation_object)
+                except Exception as e:
+                    self._L.exception('Exception occured!\n{0}')
+                    self._L.exception(e)
+                    self._L.exception("Object missing information - " + json.dumps(citation_object))
                     continue
 
                 csr.execute(sql + (json.dumps(results)).replace("'", r"''") + "','" + (
@@ -731,6 +756,9 @@ class MetricsDatabase(object):
                 self._L.exception(e)
             except psycopg2.OperationalError as e:
                 self._L.exception('Operational error!\n{0}')
+                self._L.exception(e)
+            except Exception as e:
+                self._L.exception('Exception occured!\n{0}')
                 self._L.exception(e)
 
             finally:

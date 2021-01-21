@@ -32,6 +32,27 @@ SOLR_RESERVED_CHAR_LIST = [
     '+', '-', '&', '|', '!', '(', ')', '{', '}', '[', ']', '^', '"', '~', '*', '?', ':'
 ]
 
+# Hashmap of valid citation type
+VALID_DATACITE_CITATION_TYPE = {
+  "iscitedby"       : "cites",
+  "issupplementto"  : "issupplementedby",
+  "iscontinuedby"   :  "continues",
+  "isdescribedby"   : "describes",
+  "hasmetadata"     :  "ismetadatafor",
+  "hasversion"      : "isversionof",
+  "isnewversionof"  : "isversionof",
+  "ispartof"        :  "haspart",
+  "isreferencedby"  : "references",
+  "isdocumentedby"  :  "documents",
+  "iscompiledby"    : "compiles",
+  "isvariantformof" : "isoriginalformof",
+  "isidenticalto"   :  "*",
+  "isreviewedby"    : "reviews",
+  "isderivedfrom"   : "issourceof",
+  "requires"        : "isrequiredby",
+  "isobsoletedby"   :  "obsoletes"
+}
+
 
 class CitationsManager:
     """
@@ -189,8 +210,19 @@ class CitationsManager:
                         return response
 
                     identifier  = related_id_object["identifier"]
-                    relation_type = related_id_object["relation_type"]
+                    relation_type = (related_id_object["relation_type"]).lower()
                     source_id = citation_object["source_id"]
+
+                    if relation_type in VALID_DATACITE_CITATION_TYPE:
+                        relation_type = VALID_DATACITE_CITATION_TYPE[relation_type]
+                    elif relation_type in VALID_DATACITE_CITATION_TYPE.values():
+                        pass
+                    else:
+                        response = {
+                            "message": "Not a valid relation type",
+                            "status_code": "500"
+                        }
+                        return response
 
                     try:
                         metrics_database = MetricsDatabase()
@@ -204,12 +236,15 @@ class CitationsManager:
 
                         if (re.match(doi_pattern, identifier)):
                             identifier_index = identifier.index("10.")
-                            identifier_doi = identifier[identifier_index:]
+                            identifier = identifier[identifier_index:]
 
                         citation_db_object = {}
                         citation_db_object["source_id"] = source_doi
-                        citation_db_object["target_id"] = identifier_doi
+                        citation_db_object["target_id"] = identifier
                         citation_db_object["relation_type"] = relation_type
+
+                        if submitter is not None:
+                            citation_db_object["reporter"] = submitter
 
                         if "source_url" in citation_object:
                             citation_db_object["source_url"] = citation_object["source_url"]
