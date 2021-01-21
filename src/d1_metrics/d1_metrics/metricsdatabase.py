@@ -685,8 +685,8 @@ class MetricsDatabase(object):
             citations_data = self.parseCitationsFromDisk(read_citations_from_file)
 
         csr = self.getCursor()
-        sql = "INSERT INTO CITATIONS (id, report, metadata, target_id, source_id, source_url, link_publication_date, origin, title, " + \
-              "publisher, journal, volume, page, year_of_publishing) values ( DEFAULT,'"
+        sql = "INSERT INTO CITATIONS_TEST (id, report, metadata, target_id, source_id, source_url, link_publication_date, origin, title, " + \
+              "publisher, journal, volume, page, year_of_publishing, reporter, relation_type) values ( DEFAULT,'"
 
         for citation_object in citations_data:
             self._L.info("\n")
@@ -710,7 +710,14 @@ class MetricsDatabase(object):
                     values.append(citation_object["volume"].replace("'", r"''"))
                     values.append(citation_object["page"].replace("'", r"''"))
                     values.append(str(citation_object["year_of_publishing"]))
-
+                    if ["reporter"] in citation_object:
+                        values.append(citation_object["reporter"].replace("'", r"''"))
+                    else:
+                        values.append('NULL')
+                    if ["relation_type"] in citation_object:
+                        values.append(citation_object["relation_type"].replace("'", r"''"))
+                    else:
+                        values.append('NULL')
                 except:
                     self._L.exception("Object missing information - " + citation_object)
                     continue
@@ -762,7 +769,7 @@ class MetricsDatabase(object):
         if "citation_source" in request_object:
             citation_source = request_object["citation_source"]
 
-        sql = "INSERT INTO citations_registration_queue (id, request, citation_source, receive_timestamp, ingest_attempts) VALUES ( DEFAULT, '"
+        sql = "INSERT INTO citations_registration_queue_test (id, request, citation_source, receive_timestamp, ingest_attempts) VALUES ( DEFAULT, '"
         try:
             csr.execute(sql + (json.dumps(request_object)).replace("'", r"''") + "','" + citation_source.replace("'", r"''") + "','"  + str(datetime.now()) + "',0);" )
 
