@@ -18,8 +18,8 @@ from datetime import datetime, timedelta
 from urllib.parse import quote_plus, unquote, urlparse
 
 
+from d1_metrics.metricsdatabase import MetricsDatabase
 from d1_metrics_service import pid_resolution
-from d1_metrics.metricsdatabase import  MetricsDatabase
 
 
 DEFAULT_CITATIONS_CONFIGURATION = {
@@ -84,7 +84,7 @@ class CitationsManager:
 
         citations_request = json.loads(request_string)
 
-        response = self.process_request(citations_request)
+        response = self.handle_citation_post_request(citations_request)
         resp.body = json.dumps(response, ensure_ascii=False)
 
         # The following line can be omitted because 200 is the default
@@ -123,9 +123,49 @@ class CitationsManager:
         return response
 
 
-    def queue_citation_object(self, citations_request):
+    def handle_citation_post_request(self, citation_request):
+        """
+        Takes the citation request and handles the storage job
+        :param citation_request:
+        :return:
+        """
+        if "submitter" in citation_request and "citations" in citation_request:
+            # handling updated version
+            pass
+        elif "metadata" in citation_request:
+            # handling version 1
+            return process_request(citation_request)
+
+        return
+
+
+    def register_citation(self):
         """
 
+        :return:
+        """
+        pass
+
+
+    def batch_register_citation(self):
+        """
+
+        :return:
+        """
+        pass
+
+
+    def get_citation_metadata(self):
+        """
+
+        :return:
+        """
+        pass
+
+
+    def queue_citation_object(self, citations_request):
+        """
+        Queues the citation request
         :param citations_request:
         :return:
         """
@@ -150,7 +190,7 @@ class CitationsManager:
 
     def process_citation_request(self, metrics_request):
         """
-
+        Handles retrieval of Citation object from the database
         :return: MetricsResponse Object
         """
         t_0 = time.time()
@@ -180,7 +220,7 @@ class CitationsManager:
 
     def getDatasetCitations(self, PIDs):
         """
-
+        For a given dataset PID, it resolves the identifiers and checks for a citation hit
         :param PIDs:
         :return:
         """
@@ -197,7 +237,7 @@ class CitationsManager:
 
     def gatherCitations(self, PIDs, metrics_database=None):
         """
-
+        Checks for existing citation in the database
         :param PIDs:
         :param metrics_database:
         :return:
@@ -210,7 +250,7 @@ class CitationsManager:
             metrics_database = MetricsDatabase()
             metrics_database.connect()
         csr = metrics_database.getCursor()
-        sql = 'SELECT target_id,source_id,source_url,link_publication_date,origin,title,publisher,journal,volume,page,year_of_publishing FROM citations;'
+        sql = 'SELECT target_id,source_id,source_url,link_publication_date,origin,title,publisher,journal,volume,page,year_of_publishing,relation_type FROM citations;'
 
         citations = []
         citationCount = 0
@@ -225,9 +265,7 @@ class CitationsManager:
                     if ('?' in j.lower()):
                         j = j.split("?")[0]
                     if i[0].lower() in j.lower():
-
                         citationCount = citationCount + 1
-                        citationObject["target_id"] = i[0]
                         citationObject["source_id"] = i[1]
                         citationObject["source_url"] = i[2]
                         citationObject["link_publication_date"] = i[3]
@@ -238,6 +276,16 @@ class CitationsManager:
                         citationObject["volume"] = i[8]
                         citationObject["page"] = i[9]
                         citationObject["year_of_publishing"] = i[10]
+
+                        # form the related identifier object
+                        related_identifiers_list = []
+                        related_identifier_object = {}
+                        related_identifier_object["identifier"] = i[0]
+                        related_identifier_object["relation_type"] = "cites" if i[11] is None else i[11]
+                        related_identifiers_list.append(related_identifier_object)
+
+                        citationObject["related_identifiers"] = related_identifiers_list
+
                         citations.append(citationObject)
                         # We don't want to add duplicate citations for all the objects of the dataset
                         break
