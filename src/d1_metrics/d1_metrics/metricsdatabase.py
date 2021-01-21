@@ -762,9 +762,9 @@ class MetricsDatabase(object):
         if "citation_source" in request_object:
             citation_source = request_object["citation_source"]
 
-        sql = "INSERT INTO citations_registration_queue (id, request, receive_timestamp, citation_source, ingest_attempts) VALUES ( DEFAULT, '"
+        sql = "INSERT INTO citations_registration_queue (id, request, citation_source, receive_timestamp, ingest_attempts) VALUES ( DEFAULT, '"
         try:
-            csr.execute(sql + (json.dumps(request_object)).replace("'", r"''") + "','" + citation_source.replace("'", r"''") + str(datetime.now()) + "',0);" )
+            csr.execute(sql + (json.dumps(request_object)).replace("'", r"''") + "','" + citation_source.replace("'", r"''") + "','"  + str(datetime.now()) + "',0);" )
 
         except psycopg2.DatabaseError as e:
             self._L.exception('Database error!\n{0}')

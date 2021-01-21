@@ -237,7 +237,8 @@ class MetricsElasticSearch(object):
                   "machine_ua",
                   "robot_ua",
                   "dataone_ip",
-                  "robot_ip"
+                  "robot_ip",
+                  "d1_admin_subject"
                 ]
               }
             }
@@ -261,20 +262,40 @@ class MetricsElasticSearch(object):
       if date_end is not None:
         date_filter["range"][MetricsElasticSearch.F_DATELOGGED]["lte"] = date_end.isoformat()
       search_body["query"]["bool"]["filter"] = date_filter
-    print(search_body)
     return search_body
 
 
-  def _getQueryResults(self, index, search_body, limit):
+  def _getQueryResults(self, index, search_body, limit, rawSearches=False, request_timeout=None):
     """
 
     :param index:
     :param search_body:
     :param limit:
+    :param rawSearches:
     :return: Returns ES Query results
     """
     self._L.info("Executing: %s", json.dumps(search_body, indent=2))
-    results = self._scan(query=search_body, index=index)
+    if request_timeout:
+      results = self._scan(query=search_body, scroll='1h', index=index, request_timeout=request_timeout)
+    else:
+      results = self._scan(query=search_body, scroll='1h', index=index)
+
+    rawSearchCounter = 0
+    total_hits = 0
+    data = []
+    if rawSearches:
+
+      for hit in results:
+        rawSearchCounter += 1
+        if rawSearchCounter > limit:
+          break
+        result = hit[0]
+        counter = hit[1]
+        total_hits = hit[2]
+
+        data.append(result)
+      return data, total_hits
+
     counter = 0
     total_hits = 0
     data = []
@@ -356,6 +377,116 @@ class MetricsElasticSearch(object):
       sessionid_search = {"term": {MetricsElasticSearch.F_SESSIONID: session_id}}
       search_body["query"]["bool"]["must"].append(sessionid_search)
     return self._getQueryResults(index, search_body, limit)
+
+
+  def getRawSearches(self,
+                  index=None,
+                  q=None,
+                  must_not_q=None,
+                  session_id=None,
+                  limit=10,
+                  date_start=None,
+                  date_end=None,
+                  fields=None,
+                  request_timeout=30):
+    """
+    Performs a search Query on the ES index. Based on the parametrs passes, it sets the search body and returns the
+    result to the calling function.
+    :param index:
+    :param q:
+    :param session_id:
+    :param limit:
+    :param date_start:
+    :param date_end:
+    :param fields:
+    :return: Dictionary of results from the ES. Results are aggregated and includes complete paginated responses.
+    """
+    if index is None:
+      index = self.indexname
+
+    # Set up a raw search query
+    search_body = {
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "term": {"event.key": "read"}
+            },
+            {
+              "terms": {
+                "formatType": [
+                  "DATA",
+                  "METADATA"
+                ]
+              }
+            }
+          ],
+          "must_not": [
+            {
+              "terms": {
+                "tags": [
+                  "ignore_ip",
+                  "machine_ua",
+                  "robot_ua",
+                  "dataone_ip",
+                  "robot_ip",
+                  "d1_admin_subject"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+
+    if q is None:
+      q = {
+        "query_string": {
+          "default_field": "message",
+          "query": "\/cn\/v2\/query\/solr\/",
+        }
+      }
+    else:
+      if (isinstance(q, list) ):
+        for query_object in q:
+          search_body["query"]["bool"]["must"].append(query_object)
+      if (isinstance(q, dict) ):
+        search_body["query"]["bool"]["must"].append(q)
+
+    if must_not_q is not None:
+      if (isinstance(must_not_q, dict)):
+        search_body["query"]["bool"]["must_not"].append(must_not_q)
+
+    self._L.info("query=" + json.dumps(search_body))
+    try:
+      self._L.info("retrieving events...")
+      data = self._getQueryResults(index=index, search_body=search_body, limit=limit, rawSearches=True, request_timeout=30)
+      return data
+
+    except Exception as e:
+      print("error")
+      self._L.error(e)
+    return None
+
+
+  def updateEvents(self, index_name, record):
+    """
+    Updates the event in the ES index
+    :param index_name:
+    :param record:
+    :return: Boolean flag for update status
+    """
+    try:
+      self._es.update(index=index_name,
+                    id = record["_id"],
+                    doc_type=self._doc_type,
+                    body={"doc": record["_source"]})
+
+      return True
+    except Exception as e:
+      self._L.error(e)
+    return False
+
 
 
   def getSessions(self,
@@ -973,7 +1104,8 @@ class MetricsElasticSearch(object):
                   "machine_ua",
                   "robot_ua",
                   "dataone_ip",
-                  "robot_ip"
+                  "robot_ip",
+                  "d1_admin_subject"
                 ]
               }
             }
