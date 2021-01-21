@@ -5,6 +5,7 @@ Implemented as a falcon web application, https://falcon.readthedocs.io/en/stable
 
 
 """
+import re
 import json
 import time
 import pytz
@@ -61,8 +62,10 @@ class CitationsManager:
 
         if ("=" in query_param.query):
             metrics_request = json.loads((query_param.query).split("=", 1)[1])
+            self.request = metrics_request
             resp.body = json.dumps(self.process_citation_request(metrics_request), ensure_ascii=False)
         else:
+            self.request = metrics_request
             resp.body = json.dumps(metrics_request, ensure_ascii=False)
 
         # The following line can be omitted because 200 is the default
@@ -83,6 +86,7 @@ class CitationsManager:
         request_string = req.stream.read().decode('utf8')
 
         citations_request = json.loads(request_string)
+        self.request = citations_request
 
         response = self.handle_citation_post_request(citations_request)
         resp.body = json.dumps(response, ensure_ascii=False)
@@ -129,35 +133,152 @@ class CitationsManager:
         :param citation_request:
         :return:
         """
-        if "submitter" in citation_request and "citations" in citation_request:
-            # handling updated version
-            pass
-        elif "metadata" in citation_request:
-            # handling version 1
-            return process_request(citation_request)
+        if citation_request is not None and isinstance(citation_request, dict):
+            if "submitter" in citation_request and "citations" in citation_request:
+                # handling updated version
+                if len(citation_request["citations"]) == 1:
+                    return self.register_citation(citation_object=citation_request["citations"][0], submitter=citation_request["submitter"])
 
-        return
+                elif len(citation_request["citations"]) > 1:
+                    return self.batch_register_citation(citation_request)
+
+            elif "metadata" in citation_request:
+                # handling version 1
+                return process_request(citation_request)
+
+        response = {
+            "message": "Cannot process this type of request",
+            "status_code": "500"
+        }
+
+        return response
 
 
-    def register_citation(self):
+    def register_citation(self, citation_object, submitter):
         """
-
+        Validates citation metadata and registers it into the citation database
         :return:
         """
-        pass
+        invalid_metadata = False
+        citations = []
+        if citation_object is not None and isinstance(citation_object, dict):
+
+            # validate the required fields
+            if ("source_id" in citation_object and "source_id" is not None) and \
+                ("related_identifiers" in citation_object and len(citation_object["related_identifiers"]) > 0):
+
+                for related_id_object in citation_object["related_identifiers"]:
+
+                    if "identifier" not in related_id_object or \
+                            len(related_id_object["identifier"]) < 1:
+                        print("1")
+                        invalid_metadata=True
+
+                    if "relation_type" not in related_id_object or \
+                            len(related_id_object["relation_type"]) < 1:
+                        print("2")
+                        invalid_metadata=True
+
+                    if invalid_metadata :
+
+                        response = {
+                            "message": "Incomplete Metadata. source_id, and related_identifiers are both required fields",
+                            "status_code": "500"
+                        }
+
+                        return response
+
+                    identifier  = related_id_object["identifier"]
+                    relation_type = related_id_object["relation_type"]
+                    source_id = citation_object["source_id"]
+
+                    try:
+                        metrics_database = MetricsDatabase()
+                        metrics_database.connect()
+                        doi_pattern = "^\s*(http:\/\/|https:\/\/)?(doi.org\/|dx.doi.org\/)?(doi: ?|DOI: ?)?(10\.\d{4,}(\.\d)*)\/(\w+).*$"
+                        doi_metadata = {}
+                        if (re.match(doi_pattern, source_id)):
+                            source_doi_index = source_id.index("10.")
+                            source_doi = source_id[source_doi_index:]
+                            doi_metadata = metrics_database.getDOIMetadata(doi=source_doi)
+
+                        if (re.match(doi_pattern, identifier)):
+                            identifier_index = identifier.index("10.")
+                            identifier_doi = identifier[identifier_index:]
+
+                        citation_db_object = {}
+                        citation_db_object["source_id"] = source_doi
+                        citation_db_object["target_id"] = identifier_doi
+                        citation_db_object["relation_type"] = relation_type
+
+                        if "source_url" in citation_object:
+                            citation_db_object["source_url"] = citation_object["source_url"]
+                        elif "source_url" in doi_metadata:
+                            citation_db_object["source_url"] = doi_metadata["source_url"]
+
+                        if "link_publication_date" in citation_object:
+                            citation_db_object["link_publication_date"] = citation_object["link_publication_date"]
+                        elif "link_publication_date" in doi_metadata:
+                            citation_db_object["link_publication_date"] = doi_metadata["link_publication_date"]
+
+                        if "origin" in citation_object:
+                            citation_db_object["origin"] = citation_object["origin"]
+                        elif "origin" in doi_metadata:
+                            citation_db_object["origin"] = doi_metadata["origin"]
+
+                        if "title" in citation_object:
+                            citation_db_object["title"] = citation_object["title"]
+                        elif "title" in doi_metadata:
+                            citation_db_object["title"] = doi_metadata["title"]
+
+                        if "publisher" in citation_object:
+                            citation_db_object["publisher"] = citation_object["publisher"]
+                        elif "publisher" in doi_metadata:
+                            citation_db_object["publisher"] = doi_metadata["publisher"]
+
+                        if "journal" in citation_object:
+                            citation_db_object["journal"] = citation_object["journal"]
+                        elif "journal" in doi_metadata:
+                            citation_db_object["journal"] = doi_metadata["journal"]
+
+                        if "volume" in citation_object:
+                            citation_db_object["volume"] = citation_object["volume"]
+                        elif "volume" in doi_metadata:
+                            citation_db_object["volume"] = doi_metadata["volume"]
+
+                        if "page" in citation_object:
+                            citation_db_object["page"] = citation_object["page"]
+                        elif "page" in doi_metadata:
+                            citation_db_object["page"] = doi_metadata["page"]
+
+                        if "year_of_publishing" in citation_object:
+                            citation_db_object["year_of_publishing"] = citation_object["year_of_publishing"]
+                        elif "year_of_publishing" in doi_metadata:
+                            citation_db_object["year_of_publishing"] = doi_metadata["year_of_publishing"]
+
+                        citations.append(citation_db_object)
+                        metrics_database.insertCitationObjects(citations_data=citations)
+                        response = {
+                            "message": "Registered",
+                            "status_code": "202"
+                        }
+                        return response
+
+                    except Exception as e:
+                        self.logger.error(e)
+                        return self.queue_citation_object(self.request)
+
+        response = {
+            "message": "Cannot process this type of request",
+            "status_code": "500"
+        }
+
+        return response
 
 
-    def batch_register_citation(self):
+    def batch_register_citation(self, citation_request):
         """
-
-        :return:
-        """
-        pass
-
-
-    def get_citation_metadata(self):
-        """
-
+        Handles registration of multiple citaiton requests
         :return:
         """
         pass
@@ -250,7 +371,7 @@ class CitationsManager:
             metrics_database = MetricsDatabase()
             metrics_database.connect()
         csr = metrics_database.getCursor()
-        sql = 'SELECT target_id,source_id,source_url,link_publication_date,origin,title,publisher,journal,volume,page,year_of_publishing,relation_type FROM citations;'
+        sql = 'SELECT target_id,source_id,source_url,link_publication_date,origin,title,publisher,journal,volume,page,year_of_publishing,relation_type FROM citations_test;'
 
         citations = []
         citationCount = 0
