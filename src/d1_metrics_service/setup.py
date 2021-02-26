@@ -78,7 +78,7 @@ setup(
     'requests>=2.19.1',
     'psycopg2-binary>=2.7.5',
     'schedule>=0.5.0',
-    'aiohttp==2.3',
+    'aiohttp==3.7.4',
   ],
 
   # List additional groups of dependencies here (e.g. development
