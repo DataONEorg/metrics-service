@@ -16,7 +16,8 @@ from d1_metrics.metricselasticsearch import MetricsElasticSearch
 import concurrent.futures
 
 
-PRODUCTION_SOLR = "https://cn.dataone.org/cn/v2/query/solr/"
+CN_URL = "https://cn-secondary.dataone.org/cn/v2/query"
+PRODUCTION_SOLR = CN_URL + "/solr/"
 DEFAULT_SOLR = PRODUCTION_SOLR
 CONCURRENT_REQUESTS = 20  #max number of concurrent requests to run
 BATCH_SIZE = 30000
@@ -434,7 +435,7 @@ def getPortalCollectionQueryFromSolr(url = None, portalLabel = None):
     _L, t_0 = _getLogger()
     try:
       if url is None:
-        url = "https://cn.dataone.org/cn/v2/query"
+        url = CN_URL
 
       # Create a solr client object
       solrClientObject = SolrClient(url, "solr")
@@ -467,7 +468,7 @@ def getPortalSeriesId(url = None, portalLabel = None,):
     _L, t_0 = _getLogger()
     try:
       if url is None:
-        url = "https://cn.dataone.org/cn/v2/query"
+        url = CN_URL
 
       # Create a solr client object
       solrClientObject = SolrClient(url, "solr")
@@ -498,7 +499,7 @@ def resolveCollectionQueryFromSolr(url = None, collectionQuery = "*:*"):
   _L, t_0 = _getLogger()
   # Point to the CN SOLR endpoint by default
   if url is None:
-    url = "https://cn.dataone.org/cn/v2/query"
+    url = CN_URL
 
   # unescape the escaped characters
   collectionQuery = string_escape(collectionQuery)
@@ -728,7 +729,7 @@ def string_escape(s, encoding='utf-8'):
     Un-escaping the escaped strings
 
       :param: s String to be unescaped
-      :param: 
+      :param:
 
       :returns: Unescaped String
   """

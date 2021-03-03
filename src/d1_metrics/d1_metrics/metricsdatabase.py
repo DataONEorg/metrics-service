@@ -22,6 +22,8 @@ DEFAULT_DB_CONFIG = {
     "user": "metrics",
     "password": ""
 }
+SOLR_QUERY_URL = "https://cn-secondary.dataone.org/cn/v2/query/solr/"
+CN_URL = "https://cn-secondary.dataone.org/cn/v2/query"
 
 
 class MetricsDatabase(object):
@@ -32,7 +34,7 @@ class MetricsDatabase(object):
     def __init__(self, config_file=None):
         self._L = logging.getLogger(self.__class__.__name__)
         self.conn = None
-        self.solr_query_url = "https://cn.dataone.org/cn/v2/query/solr/"
+        self.solr_query_url = SOLR_QUERY_URL
         self._config = DEFAULT_DB_CONFIG
         if not config_file is None:
             self.loadConfig(config_file)
@@ -471,12 +473,14 @@ class MetricsDatabase(object):
         return
 
 
-    def getDOIs(self):
+    def getDOIs(self, cn_url=None):
         """
         Scans the solr end point for DOIs
         :return: Set objects containing dois and their prefixes
         """
-        cd = solrclient.SolrClient('https://cn.dataone.org/cn/v2/query', 'solr')
+        if cn_url is None:
+            cn_url = CN_URL
+        cd = solrclient.SolrClient(cn_url, 'solr')
         data = cd.getFieldValues('id', q='id:/.*doi.*{1,5}10\.[0-9]{4,6}.*/')
         seriesIdData = cd.getFieldValues('seriesId', q='seriesId:/.*doi.*{1,5}10\.[0-9]{4,6}.*/')
         prefixes = []

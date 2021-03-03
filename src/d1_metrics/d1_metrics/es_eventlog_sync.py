@@ -38,7 +38,7 @@ from d1_metrics.metricselasticsearch import MetricsElasticSearch
 from d1_metrics_service import pid_resolution
 
 DATAONE_CN_SOLR = [
-    "https://cn.dataone.org/cn/v2/query"
+    "https://cn-secondary.dataone.org/cn/v2/query"
 ]
 
 DATAONE_MN_SOLR = [
@@ -189,7 +189,7 @@ def performRegularPortalCollectionQueryChecks(fields=None, mode=None):
     return portalDict
 
 
-def querySolr(url="https://cn.dataone.org/cn/v2/query/solr/?", query_string="*:*", wt="json", rows="1", fl=''):
+def querySolr(url, query_string="*:*", wt="json", rows="1", fl=''):
     """
     Client to query solr
     :param url:
@@ -201,7 +201,7 @@ def querySolr(url="https://cn.dataone.org/cn/v2/query/solr/?", query_string="*:*
     """
     logger = getESSyncLogger(name="es_eventlog")
     if url is None:
-        url = "https://cn.dataone.org/cn/v2/query/solr/?"
+        url = DATAONE_CN_SOLR[0] + "/solr/?"
 
     query = "q=" + query_string + "&fl=" + fl + "&wt=" + wt + "&rows=" + rows
 

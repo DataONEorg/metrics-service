@@ -32,7 +32,7 @@ DEFAULT_REPORT_CONFIGURATION={
     "report_name" : "Dataset Master Report",
     "release" : "rd1",
     "created_by" : "DataONE",
-    "solr_query_url": "https://cn.dataone.org/cn/v2/query/solr/"
+    "solr_query_url": "https://cn-secondary.dataone.org/cn/v2/query/solr/"
 }
 
 CONCURRENT_REQUESTS = 10  #max number of concurrent requests to run
