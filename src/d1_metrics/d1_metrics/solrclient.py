@@ -43,10 +43,10 @@ class SolrClient(object):
     self.logger = logging.getLogger(APP_LOG)
     self.client = requests.Session()
     self.parser = ConfigParser()
-    self.parser.read('/var/local/metrics-service/localconfig.ini')
+    self.parser.read('/Users/nenuji/Documents/Github/metrics-service/localconfig.ini')
     self.cert = None
-    if(self.parser.get("solr_config", "load_certs") == "True"):
-      self.cert = self._getSolrCert()
+    # if(self.parser.get("solr_config", "load_certs") == "True"):
+    #   self.cert = self._getSolrCert()
 
 
   def _getSolrCert(self):

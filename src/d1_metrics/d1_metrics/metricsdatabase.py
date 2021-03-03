@@ -589,18 +589,17 @@ class MetricsDatabase(object):
                                 datePublished = j["datePublished"]
 
                             if operation == "UPDATE":
-                                csr_statement = "UPDATE CITATION_METADATA " + \
-                                            "SET (title, datepublished, dateuploaded, datemodified) " +\
-                                            "VALUES ('" + title.replace("'", r"''") + "','" + datePublished.replace("'", r"''") + "','" + dateUploaded.replace("'", r"''") + "','" + dateModified.replace("'", r"''") + "') " +\
+                                csr_statement = "UPDATE CITATION_METADATA SET " +\
+                                            " title = '" + title.replace("'", r"''") + "', datePublished = '" + datePublished.replace("'", r"''") + "', dateUploaded = '" + dateUploaded.replace("'", r"''") + "', dateModified = '" + dateModified.replace("'", r"''") + "' " +\
                                             "WHERE target_id='" + i + "';"
-                                print(i, title, dateUploaded, datePublished, dateModified)
+                                print(csr_statement)
                             else:
 
                                 csr_statement = "INSERT INTO CITATION_METADATA (id, target_id, origin, node_id, title, datepublished, dateuploaded, datemodified) VALUES (DEFAULT,'" + \
                                                 i.replace("'", r"''")+"','{" + (",".join(origin)).replace("'", r"''")+"}','{" + \
                                                 authoritativeMN.replace("'", r"''") +"}','" + title.replace("'", r"''") + "','" + datePublished.replace("'", r"''") + "','" + dateUploaded.replace("'", r"''") + "','" + dateModified.replace("'", r"''") + "');"
-                            break
                             csr.execute(csr_statement)
+                            break
                 else:
                     self._L.exception("solr error for id: " + i)
 
@@ -871,7 +870,7 @@ if __name__ == "__main__":
     md.logConfig("metricsdatabase.log","%(name)s - %(levelname)s - %(message)s", "INFO")
     # md.parseCitationsFromDisk("PLOS.json")
     # md.parseCitationsFromDisk("Springer.json")
-    # md.getTargetCitationMetadata(operation="INSERT")
+    md.getTargetCitationMetadata()
     # md.getDOIs()
     # md.queueCitationRequest(req)
     # md.parseQueuedCitationRequests()
