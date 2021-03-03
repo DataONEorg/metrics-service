@@ -1,0 +1,5 @@
+ALTER TABLE CITATION_METADATA
+  ADD COLUMN title TEXT,
+  ADD COLUMN datePublished TEXT,
+  ADD COLUMN dateUploaded TEXT,
+  ADD COLUMN dateModified TEXT;
