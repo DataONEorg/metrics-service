@@ -19,7 +19,7 @@ DEFAULT_ELASTIC_CONFIG = {
   "host":"localhost",
   "port":9200,
   "index":"eventlog-1",
-  "request_timeout":30,
+  "request_timeout":60,
   }
 
 class MetricsElasticSearch(object):
@@ -43,7 +43,7 @@ class MetricsElasticSearch(object):
       self.loadConfig(config_file)
     self._session_id = None
     self._doc_type = "doc"
-    self._beatname = "eventlog"
+    self._entryname = "eventlog"
     if index_name is not None:
       self._L.info("Overriding index name with %s", index_name)
       self._config["index"] = index_name
@@ -226,7 +226,7 @@ class MetricsElasticSearch(object):
         "bool": {
           "must": [
             {
-              "term": { "beat.name": self._beatname }
+              "term": {"fields.entryType": self._entryname}
             },
           ],
           "must_not": [
@@ -568,7 +568,7 @@ class MetricsElasticSearch(object):
         "bool": {
           "must": [
             {
-              "term": {"beat.name": self._beatname}
+              "term": {"fields.entryType": self._entryname}
             },
             {
               "term": {"event.key": "read"}
@@ -643,7 +643,7 @@ class MetricsElasticSearch(object):
         "bool": {
           "must": [
             {
-              "term": {"beat.name": self._beatname}
+              "term": {"fields.entryType": self._entryname}
             },
             {
               "term": {"event.key": "read"}
@@ -700,7 +700,7 @@ class MetricsElasticSearch(object):
         "bool": {
           "must": [
             {
-              "term": {"beat.name": self._beatname}
+              "term": {"fields.entryType": self._entryname}
             },
             {
               "term":{"event.key": "read"}
@@ -804,7 +804,7 @@ class MetricsElasticSearch(object):
         "bool": {
           "must": [
             {
-              "term": {"beat.name": self._beatname}
+              "term": {"fields.entryType": self._entryname}
             },
             {
               "term":{"event.key": "read"}
@@ -843,7 +843,7 @@ class MetricsElasticSearch(object):
         "bool": {
           "must": [
             {
-              "term": {"beat.name": self._beatname}
+              "term": {"fields.entryType": self._entryname}
             },
             {
               "term":{"event.key": "read"}
@@ -896,7 +896,7 @@ class MetricsElasticSearch(object):
         "bool": {
           "must": [
             {
-              "term": {"beat.name": self._beatname}
+              "term": {"fields.entryType": self._entryname}
             },
             {
               "exists": {
@@ -924,6 +924,7 @@ class MetricsElasticSearch(object):
     results = self._es.update_by_query(index=index_name,
                                        body=search_body,
                                        conflicts="proceed",
+                                       request_timeout=self._config["request_timeout"],
                                        wait_for_completion="true")
     self._es.indices.refresh(index_name)
     self._L.debug(results)
@@ -934,6 +935,7 @@ class MetricsElasticSearch(object):
     self._es.update(index=index_name,
                     id = record["_id"],
                     doc_type=self._doc_type,
+                    request_timeout=self._config["request_timeout"],
                     body={"doc": record["_source"]})
 
 
