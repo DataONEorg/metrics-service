@@ -28,7 +28,7 @@ from requests.packages.urllib3.util.retry import Retry
 ### Configurations section
 
 DEFAULT_CACHE_CONFIGURATION={
-    "cn_solr_url": "https://cn.dataone.org/cn/v2/query/solr/",
+    "cn_solr_url": "https://cn-secondary.dataone.org/cn/v2/query/solr/",
     "cn_stage_solr_url": "https://cn-stage.test.dataone.org/cn/v2/query/solr/",
     "dev_solr_url": "https://dev.nceas.ucsb.edu/knb/d1/mn/v2/query/solr/",
     "caching_end_point": "https://logproc-stage-ucsb-1.test.dataone.org/test/metrics",

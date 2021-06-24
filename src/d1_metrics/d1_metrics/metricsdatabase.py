@@ -26,6 +26,8 @@ SOLR_RESERVED_CHAR_LIST = [
   '+', '-', '&', '|', '!', '(', ')', '{', '}', '[', ']', '^', '"', '~', '*',
   '?', ':'
 ]
+SOLR_QUERY_URL = "https://cn-secondary.dataone.org/cn/v2/query/solr/"
+CN_URL = "https://cn-secondary.dataone.org/cn/v2/query"
 
 
 class MetricsDatabase(object):
@@ -36,7 +38,7 @@ class MetricsDatabase(object):
     def __init__(self, config_file=None):
         self._L = logging.getLogger(self.__class__.__name__)
         self.conn = None
-        self.solr_query_url = "https://cn.dataone.org/cn/v2/query/solr/"
+        self.solr_query_url = SOLR_QUERY_URL
         self._config = DEFAULT_DB_CONFIG
         if not config_file is None:
             self.loadConfig(config_file)
@@ -496,12 +498,14 @@ class MetricsDatabase(object):
         return
 
 
-    def getDOIs(self):
+    def getDOIs(self, cn_url=None):
         """
         Scans the solr end point for DOIs
         :return: Set objects containing dois and their prefixes
         """
-        cd = solrclient.SolrClient('https://cn.dataone.org/cn/v2/query', 'solr')
+        if cn_url is None:
+            cn_url = CN_URL
+        cd = solrclient.SolrClient(cn_url, 'solr')
         data = cd.getFieldValues('id', q='id:/.*doi.*{1,5}10\.[0-9]{4,6}.*/')
         seriesIdData = cd.getFieldValues('seriesId', q='seriesId:/.*doi.*{1,5}10\.[0-9]{4,6}.*/')
         prefixes = []
@@ -541,7 +545,7 @@ class MetricsDatabase(object):
         return dois, pref
 
 
-    def getTargetCitationMetadata(self):
+    def getTargetCitationMetadata(self, operation="UPDATE"):
         """
         This method gets the target citation metadata which are basically the facets like authors,
         nodeId, awards and funding information
@@ -558,17 +562,18 @@ class MetricsDatabase(object):
             target_pids = []
             for i in csr.fetchall():
                 target_pids.append(i[0])
-            csr.execute(citation_metadata_pids)
-            saved_pids = csr.fetchall()
 
-            for i in saved_pids:
-                if i[0] in target_pids:
-                    target_pids.remove(i[0])
+            if operation != "UPDATE":
+                csr.execute(citation_metadata_pids)
+                saved_pids = csr.fetchall()
+
+                for i in saved_pids:
+                    if i[0] in target_pids:
+                        target_pids.remove(i[0])
 
             unique_pids = set(target_pids)
 
             for i in unique_pids:
-
                 # check if https DOI format
                 if "https" in i:
                     self._L.info("DOI https format: " + i)
@@ -595,8 +600,34 @@ class MetricsDatabase(object):
                                     if '"' in origin[k]:
                                         origin[k] = origin[k].replace('"', r'\"')
 
-                                csr.execute("INSERT INTO CITATION_METADATA VALUES (DEFAULT,'"+i.replace("'", r"''")+"','{" + (",".join(origin)).replace("'", r"''")+"}','{" + authoritativeMN.replace("'", r"''") +"}',NULL);")
-                                break
+                            title = ""
+                            if "title" in j:
+                                title = j["title"]
+
+                            dateUploaded = ""
+                            if "dateUploaded" in j:
+                                dateUploaded = j["dateUploaded"]
+
+                            dateModified = ""
+                            if "dateModified" in j:
+                                dateModified = j["dateModified"]
+
+                            datePublished = ""
+                            if "datePublished" in j:
+                                datePublished = j["datePublished"]
+
+                            if operation == "UPDATE":
+                                csr_statement = "UPDATE CITATION_METADATA SET " +\
+                                            " title = '" + title.replace("'", r"''") + "', datePublished = '" + datePublished.replace("'", r"''") + "', dateUploaded = '" + dateUploaded.replace("'", r"''") + "', dateModified = '" + dateModified.replace("'", r"''") + "' " +\
+                                            "WHERE target_id='" + i + "';"
+                                print(csr_statement)
+                            else:
+
+                                csr_statement = "INSERT INTO CITATION_METADATA (id, target_id, origin, node_id, title, datepublished, dateuploaded, datemodified) VALUES (DEFAULT,'" + \
+                                                i.replace("'", r"''")+"','{" + (",".join(origin)).replace("'", r"''")+"}','{" + \
+                                                authoritativeMN.replace("'", r"''") +"}','" + title.replace("'", r"''") + "','" + datePublished.replace("'", r"''") + "','" + dateUploaded.replace("'", r"''") + "','" + dateModified.replace("'", r"''") + "');"
+                            csr.execute(csr_statement)
+                            break
                 else:
                     self._L.exception("solr error for id: " + i)
                     self._L.exception(response)
@@ -690,16 +721,18 @@ class MetricsDatabase(object):
         return
 
 
-    def query_solr(self, q):
+    def query_solr(self, an_id):
         """
         Queries the Solr end-point for metadata given the PID.
         :param q: Query param
         :return: JSON Object containing the metadata fields queried from Solr
         """
 
-        queryString = 'q=id:*' + q + '* OR id:*' + q.lower() + '* OR id:*' + q.upper() \
-                      + '* OR seriesId:*' + q + '* OR seriesId:*' + q.lower() + \
-                      '* OR seriesId:*' + q.upper() + '*&fl=origin,authoritativeMN,title,datePublished,dateUploaded,dateModified&wt=json'
+        queryString = "q=(((id:*" + an_id + "*) OR (id:*" + an_id.upper() + "*) OR (id:*" + an_id.lower() + \
+                        "*) OR (seriesId:*" + an_id + "*) OR (seriesId:*" + an_id.upper() + \
+                        "*) OR (seriesId:*" + an_id.lower() + "*) OR (resourceMap:*" + an_id + \
+                        "*) OR (resourceMap:*" + an_id.upper() + "*) OR (resourceMap:*" + an_id.lower() + \
+                        "*)) AND formatType:METADATA) &fl=id,seriesId,origin,authoritativeMN,title,dateUploaded,datePublished,dateModified&wt=json&rows=1"
 
         response = requests.get(url=self.solr_query_url, params=queryString)
 
@@ -1308,8 +1341,3 @@ if __name__ == "__main__":
     #   ]
     # }
     # md.processCitationQueueObject(citation_object)
-    # md.parseCitationsRequestsFromDisk("abs_cit_errored_fix.json")
-    # md.parseCitationsRequestsFromDisk("arc_citation.json")
-    # md.getTargetCitationMetadata()
-    # md.registerQueuedCitationRequest()
-    # md.updateTargetCitationMetadata()

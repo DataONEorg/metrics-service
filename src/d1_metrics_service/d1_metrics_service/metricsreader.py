@@ -22,7 +22,7 @@ from d1_metrics.metricselasticsearch import MetricsElasticSearch
 from d1_metrics_service import pid_resolution
 
 DEFAULT_REPORT_CONFIGURATION={
-    "solr_query_url": "https://cn.dataone.org/cn/v2/query/solr/"
+    "solr_query_url": "https://cn-secondary.dataone.org/cn/v2/query/solr/"
 }
 
 # List of characters that should be escaped in solr query terms
@@ -798,23 +798,30 @@ class MetricsReader:
         metrics_database.connect()
         csr = metrics_database.getCursor()
         if nodeId == "urn:node:CN":
-            sql = 'SELECT target_id FROM citation_metadata;'
+            sql = 'SELECT target_id, origin, title, datePublished, dateUploaded, dateModified FROM citation_metadata;'
         else:
-            sql = 'SELECT target_id FROM citation_metadata WHERE \''+ nodeId +'\' = ANY (node_id);'
+            sql = 'SELECT target_id, origin, title, datePublished, dateUploaded, dateModified FROM citation_metadata WHERE \''+ nodeId +'\' = ANY (node_id);'
 
         results = []
+        target_citation_metadata = {}
         citationCount = 0
         try:
             csr.execute(sql)
             rows = csr.fetchall()
             for i in rows:
                 results.append(i[0])
+                target_citation_metadata[i[0]] = {}
+                target_citation_metadata[i[0]]["origin"] = i[1]
+                target_citation_metadata[i[0]]["title"] = i[2]
+                target_citation_metadata[i[0]]["datePublished"] = i[3]
+                target_citation_metadata[i[0]]["dateUploaded"] = i[4]
+                target_citation_metadata[i[0]]["dateModified"] = i[5]
         except Exception as e:
             print('Database error!\n{0}', e)
         finally:
             pass
         self.logger.debug("exit getRepositoryCitationPIDs, elapsed=%fsec", time.time() - t_0)
-        return(results)
+        return results, target_citation_metadata
 
 
     def quoteTerm(self, term):
@@ -1487,21 +1494,28 @@ class MetricsReader:
         metrics_database = MetricsDatabase()
         metrics_database.connect()
         csr = metrics_database.getCursor()
-        sql = "SELECT target_id FROM citation_metadata WHERE '" + seriesId + "' = ANY (portal_id);"
+        sql = "SELECT target_id, origin, title, datePublished, dateUploaded, dateModified FROM citation_metadata WHERE '" + seriesId + "' = ANY (portal_id);"
 
         results = []
+        target_citation_metadata = {}
         citationCount = 0
         try:
             csr.execute(sql)
             rows = csr.fetchall()
             for i in rows:
                 results.append(i[0])
+                target_citation_metadata[i[0]] = {}
+                target_citation_metadata[i[0]]["origin"] = i[1]
+                target_citation_metadata[i[0]]["title"] = i[2]
+                target_citation_metadata[i[0]]["datePublished"] = i[3]
+                target_citation_metadata[i[0]]["dateUploaded"] = i[4]
+                target_citation_metadata[i[0]]["dateModified"] = i[5]
         except Exception as e:
             print('Database error!\n{0}', e)
         finally:
             pass
         self.logger.debug("exit getPortalCitationPIDs, elapsed=%fsec", time.time() - t_0)
-        return (results)
+        return results, target_citation_metadata
 
 
     def formatElasticSearchResults(self, data, PIDList, start_date, end_date, aggregationType="month", objectType=None, requestMetadata={}):
@@ -1583,11 +1597,11 @@ class MetricsReader:
 
         if includeCitations:
             if objectType == "repository":
-                citation_pids = self.getRepositoryCitationPIDs(PIDList[0])
+                citation_pids, target_citation_metadata = self.getRepositoryCitationPIDs(PIDList[0])
 
             if objectType == "portal":
                 resultDetails["collectionDetails"] = requestMetadata["collectionDetails"]
-                citation_pids = self.getPortalCitationPIDs(PIDList[0])
+                citation_pids, target_citation_metadata = self.getPortalCitationPIDs(PIDList[0])
 
             totalCitationObjects, citationDetails = self.gatherCitations(citation_pids)
 
@@ -1720,37 +1734,30 @@ class MetricsReader:
 
                         results["citations"][month_index] = citationDict[months]
 
-        if includeCitations:
-            # Returning citations and dataset links in resultDetails object
-            targetSourceDict = {}
-            for i in resultDetailsCitationObject:
-                if i["source_id"] not in targetSourceDict:
-                    targetSourceDict[i["source_id"]] = {}
-                    targetSourceDict[i["source_id"]]["target_id"] = []
-                    targetSourceDict[i["source_id"]]["target_id"].append(i["target_id"])
-                else:
-                    targetSourceDict[i["source_id"]]["target_id"].append(i["target_id"])
-                for k, v in i.items():
-                    if k != "target_id":
-                        targetSourceDict[i["source_id"]][k] = v
-                targetSourceDict[i["source_id"]]["citationMetadata"] = {}
-
-            targetSourceDictPIDs = []
-            resolvedTargetSourceDict = {}
-            for source_id in targetSourceDict:
-                targetSourceDictPIDs.extend(targetSourceDict[source_id]["target_id"])
-
-            resolvedTargetSourceDict = pid_resolution.getResolvedTargetCitationMetadata(targetSourceDictPIDs)
-
-            for source_id in targetSourceDict:
-                for each_target in targetSourceDict[source_id]["target_id"]:
-                    if each_target.startswith("10.", 0, 3):
-                        each_target_pid = "doi:" + each_target
+        try:
+            if includeCitations:
+                # Returning citations and dataset links in resultDetails object
+                targetSourceDict = {}
+                for i in resultDetailsCitationObject:
+                    if i["source_id"] not in targetSourceDict:
+                        targetSourceDict[i["source_id"]] = {}
+                        targetSourceDict[i["source_id"]]["target_id"] = []
+                        targetSourceDict[i["source_id"]]["target_id"].append(i["target_id"])
                     else:
-                        each_target_pid = each_target
-                    targetSourceDict[source_id]["citationMetadata"][each_target_pid] = {}
-                    targetSourceDict[source_id]["citationMetadata"][each_target_pid] = resolvedTargetSourceDict[each_target]
-            resultDetails["citations"] = targetSourceDict
+                        targetSourceDict[i["source_id"]]["target_id"].append(i["target_id"])
+                    for k, v in i.items():
+                        if k != "target_id":
+                            targetSourceDict[i["source_id"]][k] = v
+                    targetSourceDict[i["source_id"]]["citationMetadata"] = {}
+
+                for source_id in targetSourceDict:
+                    for each_target in targetSourceDict[source_id]["target_id"]:
+                        targetSourceDict[source_id]["citationMetadata"][each_target] = {}
+                        targetSourceDict[source_id]["citationMetadata"][each_target] = target_citation_metadata[each_target]
+                resultDetails["citations"] = targetSourceDict
+        except Exception as e:
+            resultDetails["citations"] = {}
+            self.logger.error(e)
 
         # append totals to the resultDetails object
         resultDetails["totalCitations"] = totalCitations
@@ -1813,11 +1820,11 @@ class MetricsReader:
 
         if includeCitations:
             if objectType == "repository":
-                citation_pids = self.getRepositoryCitationPIDs(PIDList[0])
+                citation_pids, target_citation_metadata = self.getRepositoryCitationPIDs(PIDList[0])
 
             if objectType == "portal":
                 resultDetails["collectionDetails"] = requestMetadata["collectionDetails"]
-                citation_pids = self.getPortalCitationPIDs(PIDList[0])
+                citation_pids, target_citation_metadata = self.getPortalCitationPIDs(PIDList[0])
 
             totalCitationObjects, citationDetails = self.gatherCitations(citation_pids)
 
@@ -1949,37 +1956,31 @@ class MetricsReader:
 
                         results["citations"][day_index] = citationDict[days]
 
-        if includeCitations:
-            # Returning citations and dataset links in resultDetails object
-            targetSourceDict = {}
-            for i in resultDetailsCitationObject:
-                if i["source_id"] not in targetSourceDict:
-                    targetSourceDict[i["source_id"]] = {}
-                    targetSourceDict[i["source_id"]]["target_id"] = []
-                    targetSourceDict[i["source_id"]]["target_id"].append(i["target_id"])
-                else:
-                    targetSourceDict[i["source_id"]]["target_id"].append(i["target_id"])
-                for k, v in i.items():
-                    if k != "target_id":
-                        targetSourceDict[i["source_id"]][k] = v
-                targetSourceDict[i["source_id"]]["citationMetadata"] = {}
-
-            targetSourceDictPIDs = []
-            resolvedTargetSourceDict = {}
-            for source_id in targetSourceDict:
-                targetSourceDictPIDs.extend(targetSourceDict[source_id]["target_id"])
-
-            resolvedTargetSourceDict = pid_resolution.getResolvedTargetCitationMetadata(targetSourceDictPIDs)
-
-            for source_id in targetSourceDict:
-                for each_target in targetSourceDict[source_id]["target_id"]:
-                    if each_target.startswith("10.", 0, 3):
-                        each_target_pid = "doi:" + each_target
+        try:
+            if includeCitations:
+                # Returning citations and dataset links in resultDetails object
+                targetSourceDict = {}
+                for i in resultDetailsCitationObject:
+                    if i["source_id"] not in targetSourceDict:
+                        targetSourceDict[i["source_id"]] = {}
+                        targetSourceDict[i["source_id"]]["target_id"] = []
+                        targetSourceDict[i["source_id"]]["target_id"].append(i["target_id"])
                     else:
-                        each_target_pid = each_target
-                    targetSourceDict[source_id]["citationMetadata"][each_target_pid] = {}
-                    targetSourceDict[source_id]["citationMetadata"][each_target_pid] = resolvedTargetSourceDict[each_target]
-            resultDetails["citations"] = targetSourceDict
+                        targetSourceDict[i["source_id"]]["target_id"].append(i["target_id"])
+                    for k, v in i.items():
+                        if k != "target_id":
+                            targetSourceDict[i["source_id"]][k] = v
+                    targetSourceDict[i["source_id"]]["citationMetadata"] = {}
+
+                for source_id in targetSourceDict:
+                    for each_target in targetSourceDict[source_id]["target_id"]:
+                        targetSourceDict[source_id]["citationMetadata"][each_target] = {}
+                        targetSourceDict[source_id]["citationMetadata"][each_target] = target_citation_metadata[
+                            each_target]
+                resultDetails["citations"] = targetSourceDict
+        except Exception as e:
+            resultDetails["citations"] = {}
+            self.logger.error(e)
 
         # append totals to the resultDetails object
         resultDetails["totalCitations"] = totalCitations
@@ -2042,11 +2043,11 @@ class MetricsReader:
 
         if includeCitations:
             if objectType == "repository":
-                citation_pids = self.getRepositoryCitationPIDs(PIDList[0])
+                citation_pids, target_citation_metadata = self.getRepositoryCitationPIDs(PIDList[0])
 
             if objectType == "portal":
                 resultDetails["collectionDetails"] = requestMetadata["collectionDetails"]
-                citation_pids = self.getPortalCitationPIDs(PIDList[0])
+                citation_pids, target_citation_metadata = self.getPortalCitationPIDs(PIDList[0])
 
             totalCitationObjects, citationDetails = self.gatherCitations(citation_pids)
 
@@ -2178,37 +2179,31 @@ class MetricsReader:
 
                         results["citations"][year_index] = citationDict[years]
 
-        if includeCitations:
-            # Returning citations and dataset links in resultDetails object
-            targetSourceDict = {}
-            for i in resultDetailsCitationObject:
-                if i["source_id"] not in targetSourceDict:
-                    targetSourceDict[i["source_id"]] = {}
-                    targetSourceDict[i["source_id"]]["target_id"] = []
-                    targetSourceDict[i["source_id"]]["target_id"].append(i["target_id"])
-                else:
-                    targetSourceDict[i["source_id"]]["target_id"].append(i["target_id"])
-                for k, v in i.items():
-                    if k != "target_id":
-                        targetSourceDict[i["source_id"]][k] = v
-                targetSourceDict[i["source_id"]]["citationMetadata"] = {}
-
-            targetSourceDictPIDs = []
-            resolvedTargetSourceDict = {}
-            for source_id in targetSourceDict:
-                targetSourceDictPIDs.extend(targetSourceDict[source_id]["target_id"])
-
-            resolvedTargetSourceDict = pid_resolution.getResolvedTargetCitationMetadata(targetSourceDictPIDs)
-
-            for source_id in targetSourceDict:
-                for each_target in targetSourceDict[source_id]["target_id"]:
-                    if each_target.startswith("10.", 0, 3):
-                        each_target_pid = "doi:" + each_target
+        try:
+            if includeCitations:
+                # Returning citations and dataset links in resultDetails object
+                targetSourceDict = {}
+                for i in resultDetailsCitationObject:
+                    if i["source_id"] not in targetSourceDict:
+                        targetSourceDict[i["source_id"]] = {}
+                        targetSourceDict[i["source_id"]]["target_id"] = []
+                        targetSourceDict[i["source_id"]]["target_id"].append(i["target_id"])
                     else:
-                        each_target_pid = each_target
-                    targetSourceDict[source_id]["citationMetadata"][each_target_pid] = {}
-                    targetSourceDict[source_id]["citationMetadata"][each_target_pid] = resolvedTargetSourceDict[each_target]
-            resultDetails["citations"] = targetSourceDict
+                        targetSourceDict[i["source_id"]]["target_id"].append(i["target_id"])
+                    for k, v in i.items():
+                        if k != "target_id":
+                            targetSourceDict[i["source_id"]][k] = v
+                    targetSourceDict[i["source_id"]]["citationMetadata"] = {}
+
+                for source_id in targetSourceDict:
+                    for each_target in targetSourceDict[source_id]["target_id"]:
+                        targetSourceDict[source_id]["citationMetadata"][each_target] = {}
+                        targetSourceDict[source_id]["citationMetadata"][each_target] = target_citation_metadata[
+                            each_target]
+                resultDetails["citations"] = targetSourceDict
+        except Exception as e:
+            resultDetails["citations"] = {}
+            self.logger.error(e)
 
         # append totals to the resultDetails object
         resultDetails["totalCitations"] = totalCitations

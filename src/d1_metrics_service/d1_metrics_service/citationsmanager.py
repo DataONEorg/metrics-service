@@ -24,7 +24,7 @@ from d1_metrics_service import pid_resolution
 
 
 DEFAULT_CITATIONS_CONFIGURATION = {
-    "solr_query_url": "https://cn.dataone.org/cn/v2/query/solr/"
+    "solr_query_url": "https://cn-secondary.dataone.org/cn/v2/query/solr/"
 }
 
 # List of characters that should be escaped in solr query terms

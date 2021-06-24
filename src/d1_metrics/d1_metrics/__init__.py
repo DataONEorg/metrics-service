@@ -1,1 +1,1 @@
-__all__ = ['common', 'daemon', 'solrclient', 'manage_db', 'manage_es']
+__all__ = ['common', 'solrclient', 'manage_db', 'manage_es']

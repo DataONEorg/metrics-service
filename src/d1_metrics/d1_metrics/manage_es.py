@@ -73,7 +73,7 @@ def esGetEvents(args):
   Query the ES instance for events (default=read)
 
   Returns logevents that have
-    beat.name = eventlog
+    fields.entryType = eventlog
     formatType = "data"
     have a sessionid
     and event is "read"
