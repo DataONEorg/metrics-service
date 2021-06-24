@@ -22,6 +22,10 @@ DEFAULT_DB_CONFIG = {
     "user": "metrics",
     "password": ""
 }
+SOLR_RESERVED_CHAR_LIST = [
+  '+', '-', '&', '|', '!', '(', ')', '{', '}', '[', ']', '^', '"', '~', '*',
+  '?', ':'
+]
 
 
 class MetricsDatabase(object):
@@ -75,8 +79,17 @@ class MetricsDatabase(object):
                 hdlr.setFormatter(formatter)
             self._L.addHandler(hdlr)
 
-        if level is not None:
+        if level is None:
             self._L.setLevel(logging.WARNING)
+        elif level == "INFO":
+            self._L.setLevel(logging.INFO)
+        elif level == "DEBUG":
+            self._L.setLevel(logging.DEBUG)
+        elif level == "ERROR":
+            self._L.setLevel(logging.ERROR)
+        elif level == "CRITICAL":
+            self._L.setLevel(logging.CRITICAL)
+
         return
 
 
@@ -450,10 +463,22 @@ class MetricsDatabase(object):
                         if len(key) > 1:
                             key[0] = key[0].strip()
                             metadata[key[0]] = key[1][key[1].find("{") + 1:key[1].rfind("}")]
-                    values.append(metadata["author"].replace("'", r"''"))
-                    values.append(metadata["title"].replace("'", r"''"))
-                    values.append(metadata["publisher"].replace("'", r"''"))
-                    values.append(metadata["year"].replace("'", r"''"))
+                    if "author" in metadata:
+                        values.append(metadata["author"].replace("'", r"''"))
+                    else:
+                        values.append(None)
+                    if "title" in metadata:
+                        values.append(metadata["title"].replace("'", r"''"))
+                    else:
+                        values.append(None)
+                    if "publisher" in metadata:
+                        values.append(metadata["publisher"].replace("'", r"''"))
+                    else:
+                        values.append(None)
+                    if "year" in metadata:
+                        values.append(metadata["year"].replace("'", r"''"))
+                    else:
+                        values.append(None)
                 condition = "WHERE source_id = '" + doi + "'"
                 csr.execute(sql + "', '".join(values) + "')" + condition + ";")
                 self._L.info("Record updated")
@@ -546,16 +571,15 @@ class MetricsDatabase(object):
 
                 # check if https DOI format
                 if "https" in i:
-                    self._L.info("DOI https format: ", i)
+                    self._L.info("DOI https format: " + i)
                     pass
 
-
                 # if the doi identifier is missing DOI keyword;
-                if "10." in i[0,3]:
+                if i[:3] == "10.":
                     identifier = "doi:" + i
-                    self._L.info("DOI format : ", identifier)
+                    self._L.info("DOI format : " + identifier)
 
-                response = self.query_solr(q="*" + i + "*")
+                response = self.query_solr(q=self.escapeSolrQueryTerm(i))
 
                 if len(response) > 0:
                     results = response["response"]
@@ -568,11 +592,92 @@ class MetricsDatabase(object):
                                 for k in range(len(origin)):
                                     if "," in origin[k]:
                                         origin[k] = origin[k].replace(",", r"\,")
+                                    if '"' in origin[k]:
+                                        origin[k] = origin[k].replace('"', r'\"')
 
                                 csr.execute("INSERT INTO CITATION_METADATA VALUES (DEFAULT,'"+i.replace("'", r"''")+"','{" + (",".join(origin)).replace("'", r"''")+"}','{" + authoritativeMN.replace("'", r"''") +"}',NULL);")
                                 break
                 else:
                     self._L.exception("solr error for id: " + i)
+                    self._L.exception(response)
+
+        except psycopg2.DatabaseError as e:
+            self._L.exception('Database error!\n{0}')
+            self._L.exception(e)
+        except psycopg2.OperationalError as e:
+            self._L.exception('Operational error!\n{0}')
+            self._L.exception(e)
+        finally:
+            self.conn.commit()
+        return
+
+
+    def updateTargetCitationMetadata(self):
+        """
+        This method gets the target citation metadata which are basically the facets like authors,
+        nodeId, awards and funding information
+        This information will mostly be used for easy retrieval of citation for various profile pages
+        :return:
+        """
+        # TODO Think of other possible facets that you'll require in the future
+
+        citation_metadata_pids = "SELECT DISTINCT target_id FROM CITATION_METADATA WHERE id >= 1330;"
+        csr = self.getCursor()
+        try:
+            csr.execute(citation_metadata_pids)
+            saved_pids = csr.fetchall()
+            target_pids = []
+
+            for i in saved_pids:
+                target_pids.append(i[0])
+
+            unique_pids = set(target_pids)
+
+            for i in unique_pids:
+
+                # check if https DOI format
+                if "https" in i:
+                    self._L.info("DOI https format: " + i)
+                    pass
+
+                # if the doi identifier is missing DOI keyword;
+                if i[:3] == "10.":
+                    identifier = "doi:" + i
+                    self._L.info("DOI format : " + identifier)
+
+                response = self.query_solr(q=self.escapeSolrQueryTerm(i))
+
+                if len(response) > 0:
+                    results = response["response"]
+                    if results["numFound"] > 0:
+                        for j in results["docs"]:
+                            if "title" in j:
+                                title = j["title"]
+                            else:
+                                title = ""
+
+                            if "dateUploaded" in j:
+                                dateUploaded = j["dateUploaded"]
+                            else:
+                                dateUploaded = ""
+
+                            if "datePublished" in j:
+                                datePublished = j["datePublished"]
+                            else:
+                                datePublished = ""
+
+                            if "dateModified" in j:
+                                dateModified = j["dateModified"]
+                            else:
+                                dateModified = ""
+
+                            stmt = ("UPDATE CITATION_METADATA SET title='" + title.replace("'", r"''") + "', datePublished='" + datePublished.replace("'", r"''") + "', dateUploaded='" + dateUploaded.replace("'", r"''") + "', dateModified='" + dateModified.replace("'", r"''") + "' WHERE target_id='" + i + "';")
+                            # print(stmt)
+                            csr.execute(stmt)
+                            break
+                else:
+                    self._L.exception("solr error for id: " + i)
+                    self._L.exception(response)
 
         except psycopg2.DatabaseError as e:
             self._L.exception('Database error!\n{0}')
@@ -594,7 +699,7 @@ class MetricsDatabase(object):
 
         queryString = 'q=id:*' + q + '* OR id:*' + q.lower() + '* OR id:*' + q.upper() \
                       + '* OR seriesId:*' + q + '* OR seriesId:*' + q.lower() + \
-                      '* OR seriesId:*' + q.upper() + '*&fl=origin,authoritativeMN&wt=json'
+                      '* OR seriesId:*' + q.upper() + '*&fl=origin,authoritativeMN,title,datePublished,dateUploaded,dateModified&wt=json'
 
         response = requests.get(url=self.solr_query_url, params=queryString)
 
@@ -612,16 +717,23 @@ class MetricsDatabase(object):
         :return:
         """
         doi_metadata = {}
+        doi.replace(" ", "")
 
-        # get the DOI resolving agency
-        agency = requests.get("https://api.crossref.org/works/" + doi + "/agency/")
-        agency_body = agency.json()
+        try:
+            # get the DOI resolving agency
+            agency = requests.get("https://api.crossref.org/works/" + doi + "/agency/")
+            agency_body = agency.json()
+        except Exception as e:
+            agency_body = {}
+            agency_body["message"] = {}
+            agency_body["message"]["agency"] = {}
+            agency_body["message"]["agency"]["label"] = "Crossref"
 
         try:
 
             # If Datacite DOI - query Datacite REST endpoint
             if (agency_body["message"]["agency"]["label"] == "DataCite"):
-
+                doi_metadata["link_publication_date"] = datetime.today().strftime('%Y-%m-%d')
                 mdata = requests.get("https://api.datacite.org/works/" + doi)
                 metadata = mdata.json()
                 author = []
@@ -636,10 +748,10 @@ class MetricsDatabase(object):
                 doi_metadata["year_of_publishing"] = str(metadata["data"]["attributes"]["published"])
                 doi_metadata["source_url"] = "https://doi.org/" + doi
 
-
             # If Crossref DOI - query Crossref REST endpoint
             if (agency_body["message"]["agency"]["label"] == "Crossref"):
 
+                doi_metadata["link_publication_date"] = datetime.today().strftime('%Y-%m-%d')
                 mdata = requests.get("https://api.crossref.org/works/" + doi)
                 metadata = mdata.json()
                 author = []
@@ -662,7 +774,7 @@ class MetricsDatabase(object):
 
                 doi_metadata["source_url"] = "https://doi.org/" + doi
 
-                if "container-title" in metadata["message"]:
+                if "container-title" in metadata["message"] and len(metadata["message"]["container-title"]) > 0:
                     doi_metadata["journal"] = metadata["message"]["container-title"][0]
                 else:
                     doi_metadata["journal"] = 'NULL'
@@ -677,10 +789,8 @@ class MetricsDatabase(object):
                 else:
                     doi_metadata["page"] = 'NULL'
 
-                doi_metadata["link_publication_date"] = datetime.today().strftime('%Y-%m-%d')
-
         except Exception as e:
-            self._L.exception('DOI Metadata Resolution error!\n{0}')
+            self._L.exception('DOI Metadata Resolution error!' + doi + "\n")
             self._L.exception(e)
 
         return doi_metadata
@@ -708,7 +818,7 @@ class MetricsDatabase(object):
             citations_data = self.parseCitationsFromDisk(read_citations_from_file)
 
         csr = self.getCursor()
-        sql = "INSERT INTO CITATIONS_TEST (id, report, metadata, target_id, source_id, source_url, link_publication_date, origin, title, " + \
+        sql = "INSERT INTO CITATIONS (id, report, metadata, target_id, source_id, source_url, link_publication_date, origin, title, " + \
               "publisher, journal, volume, page, year_of_publishing, reporter, relation_type) values ( DEFAULT,'"
 
         for citation_object in citations_data:
@@ -720,18 +830,39 @@ class MetricsDatabase(object):
             values = []
 
             try:
-
+                if "target_id" and "source_id" not in citation_object:
+                    self._L.error("Source Id or Target Id missing")
+                    self._L.error(json.dumps(citation_object))
+                    continue
                 try:
                     values.append(citation_object["target_id"].replace("'", r"''"))
                     values.append(citation_object["source_id"].replace("'", r"''"))
-                    values.append(citation_object["source_url"].replace("'", r"''"))
+                    if "source_url" in citation_object:
+                        values.append(citation_object["source_url"].replace("'", r"''"))
+                    else:
+                        values.append('NULL')
                     values.append(citation_object["link_publication_date"])
                     values.append(", ".join(citation_object["origin"]).replace("'", r"''"))
-                    values.append(citation_object["title"].replace("'", r"''"))
-                    values.append(citation_object["publisher"].replace("'", r"''"))
-                    values.append(citation_object["journal"].replace("'", r"''"))
-                    values.append(citation_object["volume"].replace("'", r"''"))
-                    values.append(citation_object["page"].replace("'", r"''"))
+                    if "title" in citation_object:
+                        values.append(citation_object["title"].replace("'", r"''"))
+                    else:
+                        values.append('NULL')
+                    if "publisher" in citation_object:
+                        values.append(citation_object["publisher"].replace("'", r"''"))
+                    else:
+                        citation_object
+                    if "journal" in citation_object:
+                        values.append(citation_object["journal"].replace("'", r"''"))
+                    else:
+                        values.append('NULL')
+                    if "volume" in citation_object:
+                        values.append(citation_object["volume"].replace("'", r"''"))
+                    else:
+                        values.append('NULL')
+                    if "page" in citation_object:
+                        values.append(citation_object["page"].replace("'", r"''"))
+                    else:
+                        values.append('NULL')
                     values.append(str(citation_object["year_of_publishing"]))
                     if "reporter" in citation_object:
                         values.append(citation_object["reporter"].replace("'", r"''"))
@@ -745,24 +876,33 @@ class MetricsDatabase(object):
                     self._L.exception('Exception occured!\n{0}')
                     self._L.exception(e)
                     self._L.exception("Object missing information - " + json.dumps(citation_object))
+                    print("Object missing information")
+                    print(source_id, target_id, e)
                     continue
 
                 csr.execute(sql + (json.dumps(results)).replace("'", r"''") + "','" + (
                     json.dumps(metadata)).replace("'", r"''") + "','" + "','".join(values) + "');")
 
+                self._L.info(
+                    "SUCCESSFULLY INSERTED " + citation_object["target_id"] + " - " + citation_object[
+                        "source_id"])
+
+                print("success")
+
             except psycopg2.DatabaseError as e:
-                message = 'Database error! ' + e
                 self._L.exception('Operational error!\n{0}')
                 self._L.exception(e)
+                print("except")
             except psycopg2.OperationalError as e:
                 self._L.exception('Operational error!\n{0}')
                 self._L.exception(e)
+                print("except")
             except Exception as e:
                 self._L.exception('Exception occured!\n{0}')
                 self._L.exception(e)
+                print("except - " +  str(e))
 
             finally:
-                self._L.info("Inserted: " + citation_object["target_id"])
                 self.conn.commit()
 
         return
@@ -797,7 +937,7 @@ class MetricsDatabase(object):
         if "citation_source" in request_object:
             citation_source = request_object["citation_source"]
 
-        sql = "INSERT INTO citations_registration_queue_test (id, request, citation_source, receive_timestamp, ingest_attempts) VALUES ( DEFAULT, '"
+        sql = "INSERT INTO citations_registration_queue (id, request, citation_source, receive_timestamp, ingest_attempts) VALUES ( DEFAULT, '"
         try:
             csr.execute(sql + (json.dumps(request_object)).replace("'", r"''") + "','" + citation_source.replace("'", r"''") + "','"  + str(datetime.now()) + "',0);" )
 
@@ -823,7 +963,7 @@ class MetricsDatabase(object):
         csr = self.getCursor()
         li_citation_objects = []
 
-        sql = "SELECT * FROM citations_registration_queue;"
+        sql = "SELECT * FROM citations_registration_queue where id > 77;"
         try:
             csr.execute(sql)
             li_citation_objects = csr.fetchall()
@@ -837,6 +977,8 @@ class MetricsDatabase(object):
         finally:
             self.conn.commit()
 
+        print("lenght : ", len(li_citation_objects))
+
         return li_citation_objects
 
 
@@ -846,33 +988,75 @@ class MetricsDatabase(object):
         :param citations_request:
         :return:
         """
-        if citations_request["metadata"][0]["target_id"] is not None:
-            target_id = citations_request["metadata"][0]["target_id"]
-            target_doi_start = target_id.index("10.")
-            target_doi = target_id[target_doi_start:]
-        else:
-            self._L.error("No target_id found")
 
-        if citations_request["metadata"][0]["source_id"] is not None:
-            source_id = citations_request["metadata"][0]["source_id"]
-            source_doi_start = source_id.index("10.")
-            source_doi = source_id[source_doi_start:]
-        else:
-            self._L.error("No source_id found")
+        try:
+            if "citations" in citations_request and citations_request["citations"][0]["related_identifiers"][0]["identifier"] is not None:
+                target_id = citations_request["citations"][0]["related_identifiers"][0]["identifier"]
+                if target_id.find("10.") > -1:
+                    target_doi_start = target_id.index("10.")
+                    target_id = target_id[target_doi_start:]
+            elif "metadata" in citations_request and citations_request["metadata"][0]["target_id"] is not None:
+                target_id = citations_request["metadata"][0]["target_id"]
+                if target_id.find("10.") > -1:
+                    target_doi_start = target_id.index("10.")
+                    target_id = target_id[target_doi_start:]
+            else:
+                self._L.error("No target_id found")
 
-        if citations_request["metadata"][0]["relation_type"] is not None:
-            relation_type = citations_request["metadata"][0]["relation_type"]
-        else:
-            self._L.error("No relation_type found")
+            try:
+                if "citations" in citations_request and citations_request["citations"][0]["source_id"] is not None:
+                    source_id = citations_request["citations"][0]["source_id"]
+                    try:
+                        source_doi_start = source_id.index("10.")
+                        source_doi = source_id[source_doi_start:]
+                    except:
+                        self._L.error("Source is not a DOI")
+                        return
+                elif "metadata" in citations_request and citations_request["metadata"][0]["source_id"] is not None:
+                    source_id = citations_request["metadata"][0]["source_id"]
+                    try:
+                        source_doi_start = source_id.index("10.")
+                        source_doi = source_id[source_doi_start:]
+                    except:
+                        self._L.error("Source is not a DOI")
+                        return
+                else:
+                    self._L.error("No source_id found")
+            except ValueError as e:
+                self._L.error("Source ID has issues : " + str(e))
+                self._L.info(source_id)
+                self._L.info("Quitting the ingest process")
+                return
 
-        # retrieve metadata from Metrics Database
-        citation_object = self.getDOIMetadata(source_doi)
-        citation_object["source_id"] = source_doi
-        citation_object["target_id"] = target_id
+            if "citations" in citations_request and citations_request["citations"][0]["related_identifiers"][0]["relation_type"] is not None:
+                relation_type = citations_request["citations"][0]["related_identifiers"][0]["relation_type"]
+            elif "relation_type" in citations_request and citations_request["relation_type"] is not None:
+                relation_type = citations_request["relation_type"]
+            else:
+                relation_type = None
+                self._L.error("No relation_type found")
 
-        citations_data = []
-        citations_data.append(citation_object)
-        self.insertCitationObjects(citations_data=citations_data)
+            if "submitter" in citations_request and citations_request["submitter"] is not None:
+                submitter = citations_request["submitter"]
+            else:
+                submitter = None
+                self._L.error("No submitter found")
+
+            # retrieve metadata from Metrics Database
+            self._L.info(source_doi)
+            citation_object = self.getDOIMetadata(source_doi)
+            citation_object["source_id"] = source_doi.replace(" ", "")
+            citation_object["target_id"] = target_id.replace(" ", "")
+            citation_object["relation_type"] = relation_type
+            # database schema has attribute reporter
+            citation_object["reporter"] = submitter
+
+            citations_data = []
+            citations_data.append(citation_object)
+            self.insertCitationObjects(citations_data=citations_data)
+        except Exception as e:
+            self._L.exception("Citation registration error " + target_id)
+            self._L.exception(e)
 
 
     def parseCitationsRequestsFromDisk(self, file_name = None):
@@ -893,14 +1077,31 @@ class MetricsDatabase(object):
                 ]
         }
 
+        citations_dict = self.getExistingCitationsData()
+
         for citations_raw_request in citation_data:
             if "relation_type" not in citations_raw_request:
                 citations_raw_request["relation_type"] = "isReferencedBy"
+
+            if "target_id" not in citations_raw_request:
+                self._L.info("ERROR: no target id found")
+                self._L.info(json.dumps(citations_raw_request))
+                continue
+
+            if "source_id" not in citations_raw_request:
+                self._L.info("ERROR: no source id found")
+                self._L.info(json.dumps(citations_raw_request))
+                continue
 
             citations_request["metadata"][0]["target_id"] = citations_raw_request["target_id"]
             citations_request["metadata"][0]["source_id"] = citations_raw_request["source_id"]
             citations_request["metadata"][0]["relation_type"] = citations_raw_request["relation_type"]
             # print(json.dumps(citations_request))
+
+
+            if not self.validateUniqueCitation(citations_raw_request["target_id"], citations_raw_request["source_id"], citations_dict):
+                self._L.info("SUCCESSFULLY INSERTED " + citations_raw_request["target_id"] + " - " +citations_raw_request["source_id"])
+                continue
 
             self.processCitationQueueObject(citations_request)
         return
@@ -913,67 +1114,185 @@ class MetricsDatabase(object):
         """
         registered_list = self.parseQueuedCitationRequests()
         csr = self.getCursor()
+
+        citations_dict = self.getExistingCitationsData()
+
         for citation_object in registered_list:
+            print("trying : ", json.dumps(citation_object[1]))
             citation_object_id = citation_object[0]
             citation_object_request = citation_object[1]
             ingest_attempt = citation_object[4]
-            citation_object_request_metadata = citation_object_request["metadata"]
-            citation_object_request_type = citation_object_request["request_type"]
+            try:
+                if "metadata" in citation_object_request:
+                    citation_object_request_metadata = citation_object_request["metadata"]
+                    citation_object_request_target_id = citation_object_request_metadata[0]["target_id"]
+                    citation_object_request_source_id = citation_object_request_metadata[0]["source_id"]
+                    citation_object_request_relation_type = citation_object_request_metadata[0]["relation_type"]
+                elif "citations" in citation_object_request:
+                    citation_object_request_metadata = citation_object_request["citations"]
+                    citation_object_request_target_id = citation_object_request_metadata[0]["related_identifiers"][0][
+                        "identifier"]
+                    citation_object_request_source_id = citation_object_request_metadata[0]["source_id"]
+                    citation_object_request_relation_type = \
+                    citation_object_request_metadata[0]["related_identifiers"][0]["relation_type"]
+                else:
+                    self._L.error("Metadata not provided")
+                    continue
 
-            if (citation_object_request_type == "dataset" and
-                        ingest_attempt < 3):
-                citation_object_request_target_id = citation_object_request_metadata[0]["target_id"]
-                citation_object_request_source_id = citation_object_request_metadata[0]["source_id"]
-                citation_object_request_relation_type = citation_object_request_metadata[0]["relation_type"]
+                if "request_type" in citation_object_request:
+                    citation_object_request_type = citation_object_request["request_type"]
+                else:
+                    self._L.error("request_type not provided")
+                    continue
 
-                try:
-                    self.processCitationQueueObject(citation_object_request)
-                    ingest_timestamp = datetime.now()
 
-                    sql = "UPDATE citations_registration_queue SET ingest_timestamp = " + str(
-                        datetime.now()) + "WHERE id = " + citation_object_id + ";"
+                print("pass 1")
+
+                if (citation_object_request_type == "dataset"):
+
+                    if len(citation_object_request_target_id) > 0 and citation_object_request_target_id.find("10.") > -1:
+                        target_doi_start = citation_object_request_target_id.index("10.")
+                        citation_object_request_target_doi = citation_object_request_target_id[target_doi_start:]
+                    else:
+                        citation_object_request_target_doi = citation_object_request_target_id
+
+                    if len(citation_object_request_source_id) > 0 and citation_object_request_source_id.find("10.") > -1:
+                        source_doi_start = citation_object_request_source_id.index("10.")
+                        citation_object_request_source_doi = citation_object_request_source_id[source_doi_start:]
+                    else:
+                        citation_object_request_source_doi = citation_object_request_source_id
+
+                    print("pass 2")
+                    if not self.validateUniqueCitation(citation_object_request_target_id, citation_object_request_source_id, citations_dict):
+                        print("pass 3")
+                        self._L.info(
+                            "SUCCESSFULLY INSERTED " + citation_object_request_target_id + " - " + citation_object_request_source_id)
+                        continue
+
+                    print("pass 4")
+
                     try:
-                        csr.execute(sql)
+                        print("beginning " + citation_object_request_target_id)
+                        self.processCitationQueueObject(citation_object_request)
+                        ingest_timestamp = datetime.now()
+                        print("pass 5")
 
-                    except psycopg2.DatabaseError as e:
-                        message = 'Database error! ' + e
-                        self._L.exception('Operational error!\n{0}')
+                        sql = "UPDATE citations_registration_queue SET ingest_timestamp = '" + str(
+                            datetime.now()) + "' WHERE id = " + str(citation_object_id) + ";"
+                        try:
+                            csr.execute(sql)
+                            print("pass 6")
+
+                        except psycopg2.DatabaseError as e:
+                            self._L.exception('Operational error!\n{0}')
+                            self._L.exception(e)
+
+                        except psycopg2.OperationalError as e:
+                            self._L.exception('Operational error!\n{0}')
+                            self._L.exception(e)
+
+                    except Exception as e:
                         self._L.exception(e)
+                        ingest_attempt += 1
+                        ingest_error = str(e)
 
-                    except psycopg2.OperationalError as e:
-                        self._L.exception('Operational error!\n{0}')
-                        self._L.exception(e)
+                        sql = "UPDATE citations_registration_queue SET ingest_attempts=%d WHERE id = %d ;" % (
+                        ingest_attempt, citation_object_id)
+                        try:
+                            csr.execute(sql)
 
-                except Exception as e:
-                    self._L.exception(e)
-                    ingest_attempt += 1
-                    ingest_error = str(e)
+                        except psycopg2.DatabaseError as e:
+                            message = 'Database error! ' + e
+                            self._L.exception('Operational error!\n{0}')
+                            self._L.exception(e)
 
-                    sql = "UPDATE citations_registration_queue SET ingest_attempts=%d WHERE id = %d ;" % (
-                    ingest_attempt, citation_object_id)
-                    try:
-                        csr.execute(sql)
+                        except psycopg2.OperationalError as e:
+                            self._L.exception('Operational error!\n{0}')
+                            self._L.exception(e)
 
-                    except psycopg2.DatabaseError as e:
-                        message = 'Database error! ' + e
-                        self._L.exception('Operational error!\n{0}')
-                        self._L.exception(e)
+                    finally:
+                        self.conn.commit()
+            except Exception as e:
+                self._L.exception('Exception! \n{0}')
+                self._L.exception(e)
+                print("Exception occured  : " + str(e))
+                continue
 
-                    except psycopg2.OperationalError as e:
-                        self._L.exception('Operational error!\n{0}')
-                        self._L.exception(e)
-
-                finally:
-                    self.conn.commit()
         return
+
+
+    def escapeSolrQueryTerm(self, term):
+        term = term.replace('\\', '\\\\')
+        for c in SOLR_RESERVED_CHAR_LIST:
+            term = term.replace(c, '\{}'.format(c))
+        return term
+
+
+    def getExistingCitationsData(self):
+        """
+        Retrieves existing citations from the database
+        :return:
+        """
+        csr = self.getCursor()
+        getAllIDsSQL = "select target_id, source_id from CITATIONS;"
+        csr.execute(getAllIDsSQL)
+        data = csr.fetchall()
+        citations_dict = {}
+        for tup in data:
+            if tup[0] not in citations_dict:
+                citations_dict[tup[0]] = []
+            citations_dict[tup[0]].append(tup[1])
+
+        return citations_dict
+
+
+    def validateUniqueCitation(self, given_target_id, given_source_id, citations_dict):
+        """
+        Validates that the citation is unique and does not already exist in the database
+        :param given_target_id:
+        :param given_source_id:
+        :param retrieveData:
+        :return:
+        """
+
+        if citations_dict is None:
+            citations_dict = self.getExistingCitationsData()
+
+        if len(given_target_id) > 0 and given_target_id.find("10.") > -1:
+            target_doi_start = given_target_id.index("10.")
+            given_target_doi = given_target_id[target_doi_start:]
+        else:
+            given_target_doi = given_target_id
+
+        if len(given_source_id) > 0 and given_source_id.find("10.") > -1:
+            source_doi_start = given_source_id.index("10.")
+            given_source_doi = given_source_id[source_doi_start:]
+        else:
+            given_source_doi = given_source_id
+
+        if given_target_id in citations_dict or given_target_doi in citations_dict:
+            if given_target_id in citations_dict:
+                if given_source_id in citations_dict[given_target_id] or \
+                        given_source_doi in citations_dict[given_target_id]:
+                    self._L.info(
+                        given_target_doi + " has already a relation with " + given_source_doi)
+                    return False
+            if given_target_doi in citations_dict:
+                if given_source_id in citations_dict[given_target_doi] or \
+                        given_source_doi in citations_dict[given_target_doi]:
+                    self._L.info(
+                        given_target_doi + " has already a relation with " + given_source_doi)
+                    return False
+        return True
 
 
 if __name__ == "__main__":
     md = MetricsDatabase()
-    md.logConfig("metricsdatabase.log","%(name)s - %(levelname)s - %(message)s", "INFO")
-    # md.parseCitationsFromDisk("PLOS.json")
+    md.logConfig("metrics_database.log","%(name)s - %(levelname)s - %(message)s", "INFO")
+    # md.parseCitationsFromDisk("abs_cit_part_1_complete.json")
+    # md.insertCitationObjects(read_citations_from_file="abs_cit_part_1_complete.json")
     # md.parseCitationsFromDisk("Springer.json")
-    # md.getTargetCitationMetadata()
+
     # md.getDOIs()
     # md.queueCitationRequest(req)
     # md.parseQueuedCitationRequests()
@@ -990,5 +1309,7 @@ if __name__ == "__main__":
     # }
     # md.processCitationQueueObject(citation_object)
     # md.parseCitationsRequestsFromDisk("abs_cit_errored_fix.json")
-    # md.parseCitationsRequestsFromDisk("dbo_cits.json")
-    md.parseQueuedCitationRequests()
+    # md.parseCitationsRequestsFromDisk("arc_citation.json")
+    # md.getTargetCitationMetadata()
+    # md.registerQueuedCitationRequest()
+    # md.updateTargetCitationMetadata()
