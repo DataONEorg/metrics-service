@@ -584,7 +584,7 @@ class MetricsDatabase(object):
                     identifier = "doi:" + i
                     self._L.info("DOI format : " + identifier)
 
-                response = self.query_solr(q=self.escapeSolrQueryTerm(i))
+                response = self.query_solr(an_id=self.escapeSolrQueryTerm(i))
 
                 if len(response) > 0:
                     results = response["response"]
@@ -996,7 +996,7 @@ class MetricsDatabase(object):
         csr = self.getCursor()
         li_citation_objects = []
 
-        sql = "SELECT * FROM citations_registration_queue where id > 77;"
+        sql = "SELECT * FROM citations_registration_queue where ingest_attempts < 3;"
         try:
             csr.execute(sql)
             li_citation_objects = csr.fetchall()
@@ -1319,15 +1319,46 @@ class MetricsDatabase(object):
         return True
 
 
+    def getDuplicateCitations(self):
+        """
+        Queries the DB and retrieves duplicate citations
+        :return:
+        """
+        cits_dict = self.getExistingCitationsData()
+        resultSet =  set()
+        for source_id in cits_dict:
+            source_doi = None
+            if "10." in source_id and self.isDOI(source_id):
+                source_doi = source_id[source_id.index("10."):]
+                if source_id in resultSet or source_doi in resultSet:
+                    print("Match found for : " + source_doi + " or " + source_id )
+                else:
+                    resultSet.add(source_doi)
+            else:
+                if source_id in resultSet:
+                    print("Match found for : " + source_id )
+                else:
+                    resultSet.add(source_doi)
+
+        print(resultSet)
+        # print(json.dumps(cits_dict, indent=2))
+
+
+
+
+    def isDOI(self, identifier):
+        """
+        Checks if the given string is a DOI
+        :param identifier: the identifier string
+        :return:
+        """
+        return True
+
+
 if __name__ == "__main__":
     md = MetricsDatabase()
     md.logConfig("metrics_database.log","%(name)s - %(levelname)s - %(message)s", "INFO")
-    # md.parseCitationsFromDisk("abs_cit_part_1_complete.json")
-    # md.insertCitationObjects(read_citations_from_file="abs_cit_part_1_complete.json")
-    # md.parseCitationsFromDisk("Springer.json")
-
-    # md.getDOIs()
-    # md.queueCitationRequest(req)
+    md.getTargetCitationMetadata(operation="INSERT")
     # md.parseQueuedCitationRequests()
     # citation_object = {
     #   "request_type": "dataset",
@@ -1340,4 +1371,24 @@ if __name__ == "__main__":
     #     }
     #   ]
     # }
+    # citation_object = {
+    #    "request_type":"dataset",
+    #    "submitter":"http://orcid.org/0000-0001-7682-8064",
+    #    "citations":[
+    #       {
+    #          "related_identifiers":[
+    #             {
+    #                "identifier":"doi:10.18739/A2T14TQ6Q",
+    #                "relation_type":"isReferencedBy"
+    #             }
+    #          ],
+    #          "source_id":" 10.1002/essoar.10507393.1."
+    #       }
+    #    ]
+    # }
     # md.processCitationQueueObject(citation_object)
+    # md.parseCitationsRequestsFromDisk("abs_cit_errored_fix.json")
+    # md.parseCitationsRequestsFromDisk("../ingest_citations/toolik_cit_06_2021.json")
+    # md.parseQueuedCitationRequests()
+    # md.registerQueuedCitationRequest()
+    # md.getDuplicateCitations()
