@@ -116,7 +116,7 @@ def getESSyncLogger(level=logging.DEBUG, name=None):
     return logger
 
 
-def performRegularPortalChecks(mode="regular"):
+def performRegularPortalChecks(mode="regular",metric=None):
     """
     Queries Solr to get the list of portals that were modified
     Initiates the index update procedures for modified portals
@@ -142,7 +142,7 @@ def performRegularPortalChecks(mode="regular"):
 
     for key in portalDict:
         logger.info("Performing job for portal " + key + " with seriesId: " + portalDict[key])
-        handlePortalJob(portalDict[key])
+        handlePortalJob(portalDict[key], metric)
     t_delta = time.time() - t_start
     logger.info('performRegularPortalChecks:t1=%.4f', t_delta)
 
@@ -189,7 +189,7 @@ def performRegularPortalCollectionQueryChecks(fields=None, mode=None):
     return portalDict
 
 
-def querySolr(url, query_string="*:*", wt="json", rows="1", fl=''):
+def querySolr(url=None, query_string="*:*", wt="json", rows="1", fl=''):
     """
     Client to query solr
     :param url:
@@ -199,6 +199,8 @@ def querySolr(url, query_string="*:*", wt="json", rows="1", fl=''):
     :param fl:
     :return:
     """
+    solrClient = SolrClient()
+
     logger = getESSyncLogger(name="es_eventlog")
     if url is None:
         url = DATAONE_CN_SOLR[0] + "/solr/?"
@@ -206,7 +208,11 @@ def querySolr(url, query_string="*:*", wt="json", rows="1", fl=''):
     query = "q=" + query_string + "&fl=" + fl + "&wt=" + wt + "&rows=" + rows
 
     try:
-        response = requests.get(url=url + query)
+        if(solrClient.cert):
+            response = requests.get(url=url + query, cert=solrClient.cert)
+        else:
+            response = requests.get(url=url + query)
+
 
         if response.status_code == 200:
             return response.json()
@@ -244,7 +250,7 @@ def getPortalMetadata(seriesId="", fl="seriesId,collectionQuery"):
         return {}
 
 
-def handlePortalJob(seriesId=""):
+def handlePortalJob(seriesId="", metric=None):
     """
     High level function that handles the entire process of keeping ES index upto date for a given portal
     :param seriesId:
@@ -299,14 +305,16 @@ def handlePortalJob(seriesId=""):
 
     # update if required; else continue
     if(portalIndexUpdateRequired):
-        updateCitationsDatabase(seriesId=seriesId, PID_List=portal_DIF)
+        if metric is None or metric == "citation":
+            updateCitationsDatabase(seriesId=seriesId, PID_List=portal_DIF)
 
-        logger.info("Running expunge job for " + seriesId)
-        updateIndex(seriesId=seriesId, PID_List=updatePortalEpungePIDs(seriesId, portal_DIF), operation="remove")
+        if metric is None or metric == "usage":
+            logger.info("Running expunge job for " + seriesId)
+            updateIndex(seriesId=seriesId, PID_List=updatePortalEpungePIDs(seriesId, portal_DIF), operation="remove")
 
-        logger.info("Running update job for " + seriesId)
-        updateIndex(seriesId=seriesId, PID_List=portal_DIF, operation="add")
-        storePortalHash(seriesId=seriesId,hashVal=portal_metadata["hash"], updateEntry=updateHash)
+            logger.info("Running update job for " + seriesId)
+            updateIndex(seriesId=seriesId, PID_List=portal_DIF, operation="add")
+            storePortalHash(seriesId=seriesId,hashVal=portal_metadata["hash"], updateEntry=updateHash)
 
     t_delta = time.time() - t_start
     logger.info("Completed check for " + seriesId)
@@ -945,6 +953,10 @@ def main():
         "-m", "--mode", default="regular", help="Arg to indicate the type of run. eg. nightly job"
     )
 
+    parser.add_argument(
+        "-dm", "--metric", default=None, help="Arg to index only specific metric."
+    )
+
     args = parser.parse_args()
 
     # Setup logging verbosity
@@ -953,6 +965,7 @@ def main():
 
     end_date = args.enddate
     mode = args.mode
+    metric=args.metric
 
     if end_date is None:
         # end_date = start_date + BATCH_TDELTA_PERIOD
@@ -965,7 +978,10 @@ def main():
             print("Running regular job")
         if mode == "new":
             print("Running new job")
-        performRegularPortalChecks(mode=mode)
+
+        if  metric is not None:
+            print("Running %s job for metric: %s" % (mode, metric))
+        performRegularPortalChecks(mode=mode, metric=metric)
 
     return
 
