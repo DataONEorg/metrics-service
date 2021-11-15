@@ -751,6 +751,13 @@ class MetricsReader:
                                 }
                             }
                         ]
+                    },
+                    "aggs": {
+                        "unique_doc_count": {
+                            "cardinality": {
+                                "field": "eventId"
+                            }
+                        }
                     }
                 }
             }
@@ -946,6 +953,13 @@ class MetricsReader:
                             }
                         }
                     ]
+                },
+                "aggs": {
+                    "unique_doc_count": {
+                        "cardinality": {
+                            "field": "eventId"
+                        }
+                    }
                 }
             }
         }
@@ -1017,9 +1031,9 @@ class MetricsReader:
             months = datetime.utcfromtimestamp((i["key"]["month"] // 1000)).strftime(('%Y-%m'))
             month_index = results["months"].index(months)
             if i["key"]["format"] == "DATA":
-                results["downloads"][month_index] += i["doc_count"]
+                results["downloads"][month_index] += i["unique_doc_count"]["value"]
             elif i["key"]["format"] == "METADATA":
-                results["views"][month_index] += i["doc_count"]
+                results["views"][month_index] += i["unique_doc_count"]["value"]
             else:
                 pass
 
@@ -1123,6 +1137,13 @@ class MetricsReader:
                             }
                         }
                     ]
+                },
+                "aggs": {
+                    "unique_doc_count": {
+                        "cardinality": {
+                            "field": "eventId"
+                        }
+                    }
                 }
             }
         }
@@ -1196,9 +1217,9 @@ class MetricsReader:
             months = datetime.utcfromtimestamp((i["key"]["month"] // 1000)).strftime(('%Y-%m'))
             month_index = results["months"].index(months)
             if i["key"]["format"] == "DATA":
-                results["downloads"][month_index] += i["doc_count"]
+                results["downloads"][month_index] += i["unique_doc_count"]["value"]
             elif i["key"]["format"] == "METADATA":
-                results["views"][month_index] += i["doc_count"]
+                results["views"][month_index] += i["unique_doc_count"]["value"]
             else:
                 pass
 
@@ -1334,11 +1355,11 @@ class MetricsReader:
         # Try searching the identifiers index for the datasetIdentifierFamily
         results = metrics_elastic_search.getDatasetIdentifierFamily(search_query = search_query, index = "identifiers-2",  max_limit=10000)
         breakAt = 0
-        
+
         for i in results[0]:
             for identifier in i["datasetIdentifierFamily"]:
                 datasetIdentifierFamily.append(identifier)
-        
+
         return(datasetIdentifierFamily, results[1])
 
 
@@ -1446,6 +1467,13 @@ class MetricsReader:
                                 }
                             }
                         ]
+                    },
+                    "aggs": {
+                        "unique_doc_count": {
+                            "cardinality": {
+                                "field": "eventId"
+                            }
+                        }
                     }
                 }
             }
@@ -1532,7 +1560,7 @@ class MetricsReader:
             results - Dictionary object for Metrics Response
             resultDetails - Dictionary object for additional information about the  Metrics Response
         """
-        
+
         if aggregationType == "month":
             return (self.formatElasticSearchResultsByMonth(data, PIDList, start_date, end_date, objectType, requestMetadata))
 
@@ -1642,11 +1670,11 @@ class MetricsReader:
                     if i["key"]["country"] not in records[month]:
                         records[month][i["key"]["country"]] = {}
                     if (i["key"]["format"] == "DATA") and includeDownloads:
-                        totalDownloads += i["doc_count"]
-                        records[month][i["key"]["country"]]["downloads"] = i["doc_count"]
+                        totalDownloads += i["unique_doc_count"]["value"]
+                        records[month][i["key"]["country"]]["downloads"] = i["unique_doc_count"]["value"]
                     if (i["key"]["format"] == "METADATA") and includeViews:
-                        totalViews += i["doc_count"]
-                        records[month][i["key"]["country"]]["views"] = i["doc_count"]
+                        totalViews += i["unique_doc_count"]["value"]
+                        records[month][i["key"]["country"]]["views"] = i["unique_doc_count"]["value"]
                     pass
 
             # Parse the dictionary to form the expected output in the form of lists
@@ -1710,11 +1738,11 @@ class MetricsReader:
                     months = datetime.utcfromtimestamp((i["key"]["month"] // 1000)).strftime(('%Y-%m'))
                     month_index = results["months"].index(months)
                     if i["key"]["format"] == "DATA" and includeDownloads:
-                        totalDownloads += i["doc_count"]
-                        results["downloads"][month_index] += i["doc_count"]
+                        totalDownloads += i["unique_doc_count"]["value"]
+                        results["downloads"][month_index] += i["unique_doc_count"]["value"]
                     elif i["key"]["format"] == "METADATA" and includeViews:
-                        totalViews += i["doc_count"]
-                        results["views"][month_index] += i["doc_count"]
+                        totalViews += i["unique_doc_count"]["value"]
+                        results["views"][month_index] += i["unique_doc_count"]["value"]
                     else:
                         pass
 
@@ -1864,11 +1892,11 @@ class MetricsReader:
                     if i["key"]["country"] not in records[days]:
                         records[days][i["key"]["country"]] = {}
                     if (i["key"]["format"] == "DATA") and includeDownloads:
-                        totalDownloads += i["doc_count"]
-                        records[days][i["key"]["country"]]["downloads"] = i["doc_count"]
+                        totalDownloads += i["unique_doc_count"]["value"]
+                        records[days][i["key"]["country"]]["downloads"] = i["unique_doc_count"]["value"]
                     if (i["key"]["format"] == "METADATA") and includeViews:
-                        totalViews += i["doc_count"]
-                        records[days][i["key"]["country"]]["views"] = i["doc_count"]
+                        totalViews += i["unique_doc_count"]["value"]
+                        records[days][i["key"]["country"]]["views"] = i["unique_doc_count"]["value"]
                     pass
 
             # Parse the dictionary to form the expected output in the form of lists
@@ -1932,11 +1960,11 @@ class MetricsReader:
                     days = datetime.utcfromtimestamp((i["key"]["day"] // 1000)).strftime(('%Y-%m-%d'))
                     day_index = results["days"].index(days)
                     if i["key"]["format"] == "DATA" and includeDownloads:
-                        totalDownloads += i["doc_count"]
-                        results["downloads"][day_index] += i["doc_count"]
+                        totalDownloads += i["unique_doc_count"]["value"]
+                        results["downloads"][day_index] += i["unique_doc_count"]["value"]
                     elif i["key"]["format"] == "METADATA" and includeViews:
-                        totalViews += i["doc_count"]
-                        results["views"][day_index] += i["doc_count"]
+                        totalViews += i["unique_doc_count"]["value"]
+                        results["views"][day_index] += i["unique_doc_count"]["value"]
                     else:
                         pass
 
@@ -2087,11 +2115,11 @@ class MetricsReader:
                     if i["key"]["country"] not in records[years]:
                         records[years][i["key"]["country"]] = {}
                     if (i["key"]["format"] == "DATA") and includeDownloads:
-                        totalDownloads += i["doc_count"]
-                        records[years][i["key"]["country"]]["downloads"] = i["doc_count"]
+                        totalDownloads += i["unique_doc_count"]["value"]
+                        records[years][i["key"]["country"]]["downloads"] = i["unique_doc_count"]["value"]
                     if (i["key"]["format"] == "METADATA") and includeViews:
-                        totalViews += i["doc_count"]
-                        records[years][i["key"]["country"]]["views"] = i["doc_count"]
+                        totalViews += i["unique_doc_count"]["value"]
+                        records[years][i["key"]["country"]]["views"] = i["unique_doc_count"]["value"]
                     pass
 
             # Parse the dictionary to form the expected output in the form of lists
@@ -2155,11 +2183,11 @@ class MetricsReader:
                     years = datetime.utcfromtimestamp((i["key"]["year"] // 1000)).strftime(('%Y'))
                     year_index = results["years"].index(years)
                     if i["key"]["format"] == "DATA" and includeDownloads:
-                        totalDownloads += i["doc_count"]
-                        results["downloads"][year_index] += i["doc_count"]
+                        totalDownloads += i["unique_doc_count"]["value"]
+                        results["downloads"][year_index] += i["unique_doc_count"]["value"]
                     elif i["key"]["format"] == "METADATA" and includeViews:
-                        totalViews += i["doc_count"]
-                        results["views"][year_index] += i["doc_count"]
+                        totalViews += i["unique_doc_count"]["value"]
+                        results["views"][year_index] += i["unique_doc_count"]["value"]
                     else:
                         pass
 
