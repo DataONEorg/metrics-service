@@ -518,6 +518,13 @@ class MetricsReader:
                             }
                         }
                     }
+                },
+                "aggs": {
+                    "unique_doc_count": {
+                        "cardinality": {
+                            "field": "eventId"
+                        }
+                    }
                 }
             }
 
@@ -609,12 +616,12 @@ class MetricsReader:
 
         for i in catalogPIDs:
             if i in dataCounts:
-                results["downloads"].append(dataCounts[i]["buckets"]["pid.key"]["doc_count"])
+                results["downloads"].append(dataCounts[i]["buckets"]["pid.key"]["unique_doc_count"]["value"])
             else:
                 results["downloads"].append(0)
 
             if i in metadataCounts:
-                results["views"].append(metadataCounts[i]["buckets"]["pid.key"]["doc_count"])
+                results["views"].append(metadataCounts[i]["buckets"]["pid.key"]["unique_doc_count"]["value"])
             else:
                 results["views"].append(0)
 

@@ -1134,7 +1134,7 @@ class MetricsElasticSearch(object):
       search_body["aggs"]["pid_list"]["composite"]["after"] = {}
       search_body["aggs"]["pid_list"]["composite"]["after"] = after_record
     self._L.debug("Request: %s", str(search_body))
-    resp = self._es.search(body=search_body, request_timeout=None)
+    resp = self._es.search(body=search_body, request_timeout=self._config["request_timeout"])
     return(resp)
 
 
