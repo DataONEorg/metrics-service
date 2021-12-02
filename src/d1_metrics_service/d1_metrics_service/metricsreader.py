@@ -192,6 +192,13 @@ class MetricsReader:
                             }
                         }
                     }
+                },
+                "aggs": {
+                    "unique_doc_count": {
+                        "cardinality": {
+                            "field": "eventId"
+                        }
+                    }
                 }
             }
 
@@ -241,7 +248,13 @@ class MetricsReader:
                         }
                     ]
                 },
-                "aggs" : aggregatedPIDs
+                "aggs": {
+                    "unique_doc_count": {
+                        "cardinality": {
+                            "field": "eventId"
+                        }
+                    }
+                }
             },
             "package_pid_list": {
                 "composite": {
@@ -324,9 +337,9 @@ class MetricsReader:
             if i["key"]["country"] not in records[month]:
                 records[month][i["key"]["country"]] = {}
             if (i["key"]["format"] == "DATA"):
-                records[month][i["key"]["country"]]["downloads"] = i["doc_count"]
+                records[month][i["key"]["country"]]["downloads"] = i["unique_doc_count"]["value"]
             if (i["key"]["format"] == "METADATA"):
-                records[month][i["key"]["country"]]["views"] = i["doc_count"]
+                records[month][i["key"]["country"]]["views"] = i["unique_doc_count"]["value"]
             pass
 
 
@@ -630,19 +643,19 @@ class MetricsReader:
         for i in PIDs:
             target = i
             if target in views:
-                viewCount = views[target]["buckets"]["pid.key"]["doc_count"]
+                viewCount = views[target]["buckets"]["pid.key"]["unique_doc_count"]["value"]
             else:
                 viewCount = 0
             if target in downloads:
-                downloadCount = downloads[target]["buckets"]["pid.key"]["doc_count"]
+                downloadCount = downloads[target]["buckets"]["pid.key"]["unique_doc_count"]["value"]
             else:
                 downloadCount = 0
             while(target in obsoletesDictionary):
                 target = obsoletesDictionary[target]
                 if target in views:
-                    viewCount += views[target]["buckets"]["pid.key"]["doc_count"]
+                    viewCount += views[target]["buckets"]["pid.key"]["unique_doc_count"]["value"]
                 if target in downloads:
-                    downloadCount = downloads[target]["buckets"]["pid.key"]["doc_count"]
+                    downloadCount = downloads[target]["buckets"]["pid.key"]["unique_doc_count"]["value"]
             resultDict[i] = {}
             resultDict[i]["viewCount"] = viewCount
             resultDict[i]["downloadCount"] = downloadCount
