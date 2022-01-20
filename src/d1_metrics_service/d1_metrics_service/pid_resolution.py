@@ -339,7 +339,7 @@ def getResolvePIDs(PIDs, solr_url=None, use_mm_params=True):
     resMap.append(an_id)
 
     params = {'wt':(None,'json'),
-              'fl':(None,'documents,resourceMap'),
+              'fl':(None,'documents,resourceMap,seriesId,id'),
               'rows':(None,1000)
               }
     params['fq'] = (None,"((id:" + quoteTerm(an_id) + ") OR (seriesId:" + quoteTerm(an_id) + "))")
@@ -776,12 +776,20 @@ if __name__ == "__main__":
     pprint(res, indent=2)
 
 
+  def test_getResolvePids():
+    pids = ["oai:figshare.com:article/7438598", ]
+    res = getResolvePIDs(pids)
+    #res = getResolvePIDs(pids)
+    pprint(res, indent=2)
+
+
   #change verbosity of the urllib3.connectionpool logging
   #logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
   logging.basicConfig(level=logging.DEBUG, format='%(threadName)10s %(name)18s: %(message)s')
   # eg_pidsAndSid()
   # eg_getObsolescenceChain()
   # print("==eg: getResolvePids==")
-  getPortalCollectionQueryFromSolr(portalLabel="DBO")
+  test_getResolvePids()
+  # getPortalCollectionQueryFromSolr(portalLabel="DBO")
   # eg_getResolvePids()
   # getPortalCollectionQuery(url="https://dev.nceas.ucsb.edu/knb/d1/mn/v2/query/solr/?", portalLabel="portal-test")
