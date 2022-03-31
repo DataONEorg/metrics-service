@@ -339,7 +339,7 @@ def getResolvePIDs(PIDs, solr_url=None, use_mm_params=True):
     resMap.append(an_id)
 
     params = {'wt':(None,'json'),
-              'fl':(None,'documents,resourceMap,seriesId,id'),
+              'fl':(None,'documents,resourceMap,seriesId,id,obsoletes'),
               'rows':(None,1000)
               }
     params['fq'] = (None,"((id:" + quoteTerm(an_id) + ") OR (seriesId:" + quoteTerm(an_id) + "))")
@@ -349,12 +349,13 @@ def getResolvePIDs(PIDs, solr_url=None, use_mm_params=True):
       logging.debug(response.text)
       resMap = _getIdsFromSolrResponse(response.text,resMap)
       more_resMap_work = True
-      params['fl'] = (None,'documents,obsoletes')
+      params['fl'] = (None,'documents,resourceMap,seriesId,id,obsoletes')
 
       while more_resMap_work:
         current_length = len(resMap)
         query = ") OR (".join(map(quoteTerm, resMap))
         params['fq'] = (None,"id:((" + query + "))")
+        params['fq'] = (None,"id:((" + query + ")) OR seriesId:((" + query + "))")
         response = _doPost(session, url, params, use_mm=use_mm_params)
         if response.status_code == requests.codes.ok:
           resMap = _getIdsFromSolrResponse(response.text, resMap)
@@ -777,9 +778,15 @@ if __name__ == "__main__":
 
 
   def test_getResolvePids():
-    pids = ["oai:figshare.com:article/7438598", ]
+    pids = ["doi:10.15485/1603775", "ess-dive-d3dc26585e68115-20210722T195610978"]
     res = getResolvePIDs(pids)
     #res = getResolvePIDs(pids)
+
+    # test the differences
+    pprint(set(res['ess-dive-d3dc26585e68115-20210722T195610978']).difference(set(res['doi:10.15485/1603775'])))
+    pprint(set(res['doi:10.15485/1603775']).difference(set(res['ess-dive-d3dc26585e68115-20210722T195610978'])))
+
+    # print the results dict
     pprint(res, indent=2)
 
 
