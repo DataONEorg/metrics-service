@@ -424,7 +424,6 @@ class MetricsReader:
         # Retreive the citations if any!
         t_0 = time.time()
         self.logger.debug("enter gatherCitations")
-        self.logger.debug("enter gatherCitations")
         if metrics_database is None:
             metrics_database = MetricsDatabase()
             metrics_database.connect()
@@ -831,7 +830,6 @@ class MetricsReader:
 
         results = []
         target_citation_metadata = {}
-        citationCount = 0
         try:
             csr.execute(sql)
             rows = csr.fetchall()
@@ -1644,6 +1642,8 @@ class MetricsReader:
         resultDetailsCitationObject = []
 
         if includeCitations:
+            citation_pids = []  # Initialize to prevent NameError
+            target_citation_metadata = {}  # Initialize to prevent NameError
             if objectType == "repository":
                 citation_pids, target_citation_metadata = self.getRepositoryCitationPIDs(PIDList[0])
 
@@ -1663,7 +1663,7 @@ class MetricsReader:
                 # Check if the citations falls within the given time range.
                 citation_pub_date = datetime.strptime(citation_link_pub_date, "%Y-%m")
 
-                if (citation_pub_date > start_dt) and (citation_pub_date < end_dt):
+                if (citation_pub_date >= start_dt) and (citation_pub_date <= end_dt):
                     resultDetailsCitationObject.append(citationObject)
                     totalCitations += 1
                     if (citation_link_pub_date in citationDict):
@@ -1755,16 +1755,39 @@ class MetricsReader:
             if includeViews or includeDownloads or data:
                 # Formatting the response from ES
                 for i in data["aggregations"]["pid_list"]["buckets"]:
-                    months = datetime.utcfromtimestamp((i["key"]["month"] // 1000)).strftime(('%Y-%m'))
-                    month_index = results["months"].index(months)
-                    if i["key"]["format"] == "DATA" and includeDownloads:
-                        totalDownloads += i["unique_doc_count"]["value"]
-                        results["downloads"][month_index] += i["unique_doc_count"]["value"]
-                    elif i["key"]["format"] == "METADATA" and includeViews:
-                        totalViews += i["unique_doc_count"]["value"]
-                        results["views"][month_index] += i["unique_doc_count"]["value"]
+                    months = datetime.fromtimestamp((i["key"]["month"] // 1000)).strftime(('%Y-%m'))
+                    self.logger.debug('months: %s', months)
+                    self.logger.debug('results["months"]: %s', results["months"])
+                    if months in results["months"]:
+                        month_index = results["months"].index(months)
+                        if i["key"]["format"] == "DATA" and includeDownloads:
+                            totalDownloads += i["unique_doc_count"]["value"]
+                            results["downloads"][month_index] += i["unique_doc_count"]["value"]
+                        elif i["key"]["format"] == "METADATA" and includeViews:
+                            totalViews += i["unique_doc_count"]["value"]
+                            results["views"][month_index] += i["unique_doc_count"]["value"]
+                        else:
+                            pass
                     else:
-                        pass
+                        # if month index is not there, append it to the results
+                        results["months"].append(months)
+                        
+                        if includeDownloads:
+                            if i["key"]["format"] == "DATA":
+                                totalDownloads += i["unique_doc_count"]["value"]
+                                results["downloads"].append(i["unique_doc_count"]["value"])
+                            else:
+                                results["downloads"].append(0)
+                        
+                        if includeViews:
+                            if i["key"]["format"] == "METADATA":
+                                totalViews += i["unique_doc_count"]["value"]
+                                results["views"].append(i["unique_doc_count"]["value"])
+                            else:
+                                results["views"].append(0)
+                        
+                        if includeCitations:
+                            results["citations"].append(0)
 
             if includeCitations:
                 for months in citationDict:
@@ -1780,8 +1803,10 @@ class MetricsReader:
                         if includeViews:
                             results["views"].append(0)
 
-                        results["citations"][month_index] = citationDict[months]
+                        results["citations"][-1] = citationDict[months]
 
+        self.logger.debug('resultDetailsCitationObject: %s', resultDetailsCitationObject)
+        self.logger.debug("includeCitations: %s", includeCitations)
         try:
             if includeCitations:
                 # Returning citations and dataset links in resultDetails object
@@ -1801,11 +1826,16 @@ class MetricsReader:
                 for source_id in targetSourceDict:
                     for each_target in targetSourceDict[source_id]["target_id"]:
                         targetSourceDict[source_id]["citationMetadata"][each_target] = {}
-                        targetSourceDict[source_id]["citationMetadata"][each_target] = target_citation_metadata[each_target]
+                        if each_target in target_citation_metadata:
+                            targetSourceDict[source_id]["citationMetadata"][each_target] = target_citation_metadata[each_target]
+                        else:
+                            self.logger.warning(f"Target {each_target} not found in target_citation_metadata")
                 resultDetails["citations"] = targetSourceDict
         except Exception as e:
             resultDetails["citations"] = {}
-            self.logger.error(e)
+            self.logger.error(f"Error processing citations: {e}", exc_info=True)
+        finally:
+            self.logger.debug('resultDetails["citations"]: %s', resultDetails["citations"])
 
         # append totals to the resultDetails object
         resultDetails["totalCitations"] = totalCitations
@@ -1867,6 +1897,8 @@ class MetricsReader:
         resultDetailsCitationObject = []
 
         if includeCitations:
+            citation_pids = []  # Initialize to prevent NameError
+            target_citation_metadata = {}  # Initialize to prevent NameError
             if objectType == "repository":
                 citation_pids, target_citation_metadata = self.getRepositoryCitationPIDs(PIDList[0])
 
@@ -2023,11 +2055,14 @@ class MetricsReader:
                 for source_id in targetSourceDict:
                     for each_target in targetSourceDict[source_id]["target_id"]:
                         targetSourceDict[source_id]["citationMetadata"][each_target] = {}
-                        targetSourceDict[source_id]["citationMetadata"][each_target] = target_citation_metadata[
-                            each_target]
+                        if each_target in target_citation_metadata:
+                            targetSourceDict[source_id]["citationMetadata"][each_target] = target_citation_metadata[each_target]
+                        else:
+                            self.logger.warning(f"Target {each_target} not found in target_citation_metadata")
                 resultDetails["citations"] = targetSourceDict
         except Exception as e:
             resultDetails["citations"] = {}
+            self.logger.error(f"Error processing citations: {e}", exc_info=True)
             self.logger.error(e)
 
         # append totals to the resultDetails object
@@ -2090,6 +2125,8 @@ class MetricsReader:
         resultDetailsCitationObject = []
 
         if includeCitations:
+            citation_pids = []  # Initialize to prevent NameError
+            target_citation_metadata = {}  # Initialize to prevent NameError
             if objectType == "repository":
                 citation_pids, target_citation_metadata = self.getRepositoryCitationPIDs(PIDList[0])
 
@@ -2246,12 +2283,14 @@ class MetricsReader:
                 for source_id in targetSourceDict:
                     for each_target in targetSourceDict[source_id]["target_id"]:
                         targetSourceDict[source_id]["citationMetadata"][each_target] = {}
-                        targetSourceDict[source_id]["citationMetadata"][each_target] = target_citation_metadata[
-                            each_target]
+                        if each_target in target_citation_metadata:
+                            targetSourceDict[source_id]["citationMetadata"][each_target] = target_citation_metadata[each_target]
+                        else:
+                            self.logger.warning(f"Target {each_target} not found in target_citation_metadata")
                 resultDetails["citations"] = targetSourceDict
         except Exception as e:
             resultDetails["citations"] = {}
-            self.logger.error(e)
+            self.logger.error(f"Error processing citations: {e}", exc_info=True)
 
         # append totals to the resultDetails object
         resultDetails["totalCitations"] = totalCitations
