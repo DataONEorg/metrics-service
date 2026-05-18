@@ -117,6 +117,43 @@ def quoteTerm(term):
     return '"' + solrclient.escapeSolrQueryTerm(term) + '"'
 
 
+def termsQuery(field, terms, separator=" "):
+    """
+  Return a Solr TermsQParser query for matching any of the provided terms.
+
+  The terms parser receives pre-analyzed values, so identifier values should
+  not be escaped as standard Solr query terms.
+  Args:
+    field: field to match
+    terms: iterable of identifier values
+
+  Returns: (string) Solr terms query
+  """
+    if separator == " ":
+        return '{!terms f=' + field + ' separator=" "}' + " ".join(map(str, terms))
+    return "{!terms f=" + field + "}" + separator.join(map(str, terms))
+
+
+def _quoteSubquery(query):
+    return '_query_:"' + query.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def setTermsFilterQuery(params, fields, terms):
+    """
+  Set params['fq'] to a TermsQParser filter query for one or more fields.
+  """
+    terms = list(terms)
+    if len(fields) == 1:
+        params["fq"] = (None, termsQuery(fields[0], terms))
+        return
+
+    field_queries = []
+    for field in fields:
+        # The _query_ wrapper is quoted, so use the terms parser's comma separator here.
+        field_queries.append(_quoteSubquery(termsQuery(field, terms, separator=",")))
+    params["fq"] = (None, " OR ".join(field_queries))
+
+
 def _getIdsFromSolrResponse(response_text, pids=[]):
     """
   Helper to retrieve identifiers from the solr response
@@ -226,8 +263,7 @@ def getResolvePIDs(PIDs, solr_url, use_mm_params=True):
 
             while more_resMap_work:
                 current_length = len(resMap)
-                query = ") OR (".join(map(quoteTerm, resMap))
-                params["fq"] = (None, "id:((" + query + "))")
+                setTermsFilterQuery(params, ["id"], resMap)
                 response = _doPost(session, url, params, use_mm=use_mm_params)
                 if response.status_code == requests.codes.ok:
                     resMap = _getIdsFromSolrResponse(response.text, resMap)
@@ -237,8 +273,7 @@ def getResolvePIDs(PIDs, solr_url, use_mm_params=True):
                     more_resMap_work = False
 
             params["fl"] = (None, "id,documents,obsoletes")
-            query = ") OR (".join(map(quoteTerm, resMap))
-            params["fq"] = (None, "resourceMap:((" + query + "))")
+            setTermsFilterQuery(params, ["resourceMap"], resMap)
             response = _doPost(session, url, params, use_mm=use_mm_params)
             if response.status_code == requests.codes.ok:
                 result = _getIdsFromSolrResponse(response.text, result)
@@ -246,8 +281,7 @@ def getResolvePIDs(PIDs, solr_url, use_mm_params=True):
             more_work = True
             while more_work:
                 current_length = len(result)
-                query = ") OR (".join(map(quoteTerm, result))
-                params["fq"] = (None, "id:((" + query + "))")
+                setTermsFilterQuery(params, ["id"], result)
                 response = _doPost(session, url, params, use_mm=use_mm_params)
                 if response.status_code == requests.codes.ok:
                     result = _getIdsFromSolrResponse(response.text, result)
