@@ -75,9 +75,11 @@ def termsQuery(field, terms, separator=" "):
 
   Returns: (string) Solr terms query
   '''
-  if separator == " ":
-    return '{!terms f=' + field + ' separator=" "}' + " ".join(map(str, terms))
-  return '{!terms f=' + field + '}' + separator.join(map(str, terms))
+  return "{!terms f='%s' separator='%s' v='%s'}" % (
+    field,
+    separator,
+    separator.join(map(str, terms)),
+  )
 
 
 def _quoteSubquery(query):
@@ -95,9 +97,8 @@ def setTermsFilterQuery(params, fields, terms):
 
   field_queries = []
   for field in fields:
-    # The _query_ wrapper is quoted, so use the terms parser's comma separator here.
-    field_queries.append(_quoteSubquery(termsQuery(field, terms, separator=",")))
-  params['fq'] = (None, ' OR '.join(field_queries))
+    field_queries.append(termsQuery(field, terms))
+  params['fq'] = (None, '(' + ' OR '.join(field_queries) + ')')
 
 
 def _defaults(solr_url):
