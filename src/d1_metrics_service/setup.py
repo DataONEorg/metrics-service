@@ -68,15 +68,18 @@ setup(
   # requirements files see:
   # https://packaging.python.org/en/latest/requirements.html
   install_requires=[
-    'pytz>=2018.5',
-    'elasticsearch==6.3.0',
-    'psycopg2-binary>=2.7.5',
-    'falcon>=1.4.1',
-    'dateparser>=0.7.0',
-    'requests>=2.19.1',
-    'psycopg2-binary>=2.7.5',
-    'schedule>=0.5.0',
-    'aiohttp==2.3',
+    'aiohttp>=2.3.10,<3',
+    'async-timeout>=1.2.0,<4',
+    'chardet>=3.0.2,<5',
+    'dateparser>=0.7.6,<1',
+    'elasticsearch>=6.8.2,<7',
+    'falcon>=1.4.1,<2',
+    'psycopg2-binary>=2.9.8,<2.10',
+    'pytz>=2026.2',
+    'regex>=2021.11.10,<2022',
+    'requests>=2.27.1,<3',
+    'schedule>=0.6.0,<1',
+    'tzlocal>=2.1,<3',
   ],
 
   # List additional groups of dependencies here (e.g. development

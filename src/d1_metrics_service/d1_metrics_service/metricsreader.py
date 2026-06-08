@@ -301,10 +301,10 @@ class MetricsReader:
 
         t_delta = time.time() - t_start
         self.logger.debug('getSummaryMetricsPerDataset:t3=%.4f', t_delta)
-        return (self.formatDataPerDataset(data, PIDs, obsoletesDictionary))
+        return (self.formatDataPerDataset(data, PIDs, obsoletesDictionary, start_date, end_date))
 
 
-    def formatDataPerDataset(self, data, PIDs, obsoletesDictionary):
+    def formatDataPerDataset(self, data, PIDs, obsoletesDictionary, start_date=None, end_date=None):
         """
         Formats the data into the specified Swagger format
         :param data: Dictionary retrieved from the ES
@@ -324,11 +324,14 @@ class MetricsReader:
         resultDetails = {}
         resultDetails["citations"] = []
         citationDict = {}
+        start_month = None
+        end_month = None
+        if start_date is not None and end_date is not None:
+            start_month = datetime.strptime(start_date, "%m/%d/%Y").strftime("%Y-%m")
+            end_month = datetime.strptime(end_date, "%m/%d/%Y").strftime("%Y-%m")
 
         totalCitations,resultDetails["citations"] = self.gatherCitations(PIDs)
         resultDetails["metrics_package_counts"] = self.parsePackageCounts(data, PIDs, obsoletesDictionary)
-        appendedCitations = False
-
         # Combine metrics into a single dictionary
         for i in data["aggregations"]["pid_list"]["buckets"]:
             month = datetime.utcfromtimestamp((i["key"]["month"]//1000)).strftime(('%Y-%m'))
@@ -344,16 +347,30 @@ class MetricsReader:
 
 
         for citationObject in resultDetails["citations"]:
-            if(citationObject["link_publication_date"][:7] in citationDict):
-                citationDict[citationObject["link_publication_date"][:7]] = citationDict[citationObject["link_publication_date"][:7]] + 1
+            link_publication_date = citationObject["link_publication_date"]
+            if link_publication_date is None or link_publication_date == "NULL":
+                continue
+            citation_link_pub_date = link_publication_date[:7]
+            if start_month is not None and (
+                    citation_link_pub_date < start_month or citation_link_pub_date > end_month):
+                continue
+            if(citation_link_pub_date in citationDict):
+                citationDict[citation_link_pub_date] = citationDict[citation_link_pub_date] + 1
             else:
-                citationDict[citationObject["link_publication_date"][:7]] = 1
+                citationDict[citation_link_pub_date] = 1
 
 
         if ("country" in self.response["metricsRequest"]["groupBy"]):
+            if ("citations" in self.response["metricsRequest"]["metrics"]):
+                for months, totals in citationDict.items():
+                    if months not in records:
+                        records[months] = {}
+                    if "US" not in records[months]:
+                        records[months]["US"] = {}
+                    records[months]["US"]["citations"] = totals
+
             # Parse the dictionary to form the expected output in the form of lists
             for months in records:
-                appendedCitations = False
                 for country in records[months]:
                     results["months"].append(months)
                     results["country"].append(country)
@@ -371,13 +388,10 @@ class MetricsReader:
                             results["views"].append(0)
 
                     if ("citations" in self.response["metricsRequest"]["metrics"]):
-                        if(not appendedCitations):
-                            citationCount = 0
-                            if(months in citationDict):
-                                results["citations"].append(citationDict[months])
-                            else:
-                                results["citations"].append(0)
-                            appendedCitations = True
+                        if "citations" in records[months][country]:
+                            results["citations"].append(records[months][country]["citations"])
+                        else:
+                            results["citations"].append(0)
 
         else:
             for months in records:
@@ -574,6 +588,11 @@ class MetricsReader:
 
         start_date = "01/01/2012"
         end_date = datetime.today().strftime('%m/%d/%Y')
+        if (len(self.response["metricsRequest"]["filterBy"]) > 1):
+            if (self.response["metricsRequest"]["filterBy"][1]["filterType"] == "month" and
+                    self.response["metricsRequest"]["filterBy"][1]["interpretAs"] == "range"):
+                start_date = self.response["metricsRequest"]["filterBy"][1]["values"][0]
+                end_date = self.response["metricsRequest"]["filterBy"][1]["values"][1]
 
         data = metrics_elastic_search.iterate_composite_aggregations(search_query=search_body,
                                                                      aggregation_query=aggregation_body,
@@ -584,10 +603,10 @@ class MetricsReader:
         # return {}, {}
         # return data, return_dict
         self.logger.debug("exit getSummaryMetricsPerCatalog, duration=%fsec", time.time()-t_0)
-        return (self.formatDataPerCatalog(data, catalogPIDs))
+        return (self.formatDataPerCatalog(data, catalogPIDs, start_date, end_date))
 
 
-    def formatDataPerCatalog(self, data, catalogPIDs):
+    def formatDataPerCatalog(self, data, catalogPIDs, start_date=None, end_date=None):
         dataCounts = {}
         metadataCounts = {}
         downloads = []
@@ -604,8 +623,22 @@ class MetricsReader:
 
         metrics_database = MetricsDatabase()
         metrics_database.connect()
+        start_month = None
+        end_month = None
+        if start_date is not None and end_date is not None:
+            start_month = datetime.strptime(start_date, "%m/%d/%Y").strftime("%Y-%m")
+            end_month = datetime.strptime(end_date, "%m/%d/%Y").strftime("%Y-%m")
         for i in catalogPIDs:
             count, cits = self.gatherCitations(catalogPIDs[i], metrics_database=metrics_database)
+            if start_month is not None:
+                count = 0
+                for citationObject in cits:
+                    link_publication_date = citationObject["link_publication_date"]
+                    if link_publication_date is None or link_publication_date == "NULL":
+                        continue
+                    citation_link_pub_date = link_publication_date[:7]
+                    if citation_link_pub_date >= start_month and citation_link_pub_date <= end_month:
+                        count += 1
             results["citations"].append(count)
 
         for i in data["aggregations"]["pid_list"]["buckets"]:
@@ -700,7 +733,7 @@ class MetricsReader:
         end_date = datetime.today().strftime('%m/%d/%Y')
 
         # update the date range if supplied in the query
-        if (len(self.response["metricsRequest"]["filterBy"]) > 0):
+        if (len(self.response["metricsRequest"]["filterBy"]) > 1):
             if ((self.response["metricsRequest"]["filterBy"][1]["filterType"] == "month" or
                     self.response["metricsRequest"]["filterBy"][1]["filterType"] == "day" or
                     self.response["metricsRequest"]["filterBy"][1]["filterType"] == "year") and
@@ -919,11 +952,13 @@ class MetricsReader:
             if (self.response["metricsRequest"]["filterBy"][1]["filterType"] == "month" and
                         self.response["metricsRequest"]["filterBy"][1]["interpretAs"] == "range"):
                 start_date = self.response["metricsRequest"]["filterBy"][1]["values"][0]
+                end_date = self.response["metricsRequest"]["filterBy"][1]["values"][1]
             else:
                 start_date = "01/01/2012"
+                end_date = datetime.today().strftime('%m/%d/%Y')
         else:
             start_date = "01/01/2012"
-        end_date = datetime.today().strftime('%m/%d/%Y')
+            end_date = datetime.today().strftime('%m/%d/%Y')
 
 
         # Setting the query for the user profile
@@ -1023,6 +1058,8 @@ class MetricsReader:
         # Getting the months between the two given dates:
         start = datetime.strptime(start_date, "%m/%d/%Y")
         end = datetime.strptime(end_date, "%m/%d/%Y")
+        start_month = datetime.strftime(start, "%Y-%m")
+        end_month = datetime.strftime(end, "%Y-%m")
 
         # Getting a list of all the months possible for the user
         # And initializing the corresponding metrics array
@@ -1039,12 +1076,17 @@ class MetricsReader:
         totalCitations, resultDetails["citations"] = self.gatherCitations(citation_pids)
 
         for citationObject in resultDetails["citations"]:
-            if (citationObject["link_publication_date"][:7] in citationDict):
-                citationDict[citationObject["link_publication_date"][:7]] = citationDict[
-                                                                                citationObject["link_publication_date"][
-                                                                                :7]] + 1
+            link_publication_date = citationObject["link_publication_date"]
+            if (link_publication_date == None) or (link_publication_date == "NULL"):
+                citation_link_pub_date = end_month
             else:
-                citationDict[citationObject["link_publication_date"][:7]] = 1
+                citation_link_pub_date = link_publication_date[:7]
+
+            if (citation_link_pub_date >= start_month) and (citation_link_pub_date <= end_month):
+                if (citation_link_pub_date in citationDict):
+                    citationDict[citation_link_pub_date] = citationDict[citation_link_pub_date] + 1
+                else:
+                    citationDict[citation_link_pub_date] = 1
 
         # Formatting the response from ES
         for i in data["aggregations"]["pid_list"]["buckets"]:
@@ -1065,7 +1107,7 @@ class MetricsReader:
                 results["months"].append(months)
                 results["views"].append(0)
                 results["downloads"].append(0)
-                results["citations"][month_index] = citationDict[months]
+                results["citations"].append(citationDict[months])
 
         return results, resultDetails
 
@@ -1103,11 +1145,13 @@ class MetricsReader:
             if (self.response["metricsRequest"]["filterBy"][1]["filterType"] == "month" and
                         self.response["metricsRequest"]["filterBy"][1]["interpretAs"] == "range"):
                 start_date = self.response["metricsRequest"]["filterBy"][1]["values"][0]
+                end_date = self.response["metricsRequest"]["filterBy"][1]["values"][1]
             else:
                 start_date = "01/01/2012"
+                end_date = datetime.today().strftime('%m/%d/%Y')
         else:
             start_date = "01/01/2012"
-        end_date = datetime.today().strftime('%m/%d/%Y')
+            end_date = datetime.today().strftime('%m/%d/%Y')
 
 
         # Setting the query for the user profile
@@ -1209,6 +1253,8 @@ class MetricsReader:
         # Getting the months between the two given dates:
         start = datetime.strptime(start_date, "%m/%d/%Y")
         end = datetime.strptime(end_date, "%m/%d/%Y")
+        start_month = datetime.strftime(start, "%Y-%m")
+        end_month = datetime.strftime(end, "%Y-%m")
 
         # Getting a list of all the months possible for the user
         # And initializing the corresponding metrics array
@@ -1225,12 +1271,17 @@ class MetricsReader:
         totalCitations, resultDetails["citations"] = self.gatherCitations(citation_pids)
 
         for citationObject in resultDetails["citations"]:
-            if (citationObject["link_publication_date"][:7] in citationDict):
-                citationDict[citationObject["link_publication_date"][:7]] = citationDict[
-                                                                                citationObject["link_publication_date"][
-                                                                                :7]] + 1
+            link_publication_date = citationObject["link_publication_date"]
+            if (link_publication_date == None) or (link_publication_date == "NULL"):
+                citation_link_pub_date = end_month
             else:
-                citationDict[citationObject["link_publication_date"][:7]] = 1
+                citation_link_pub_date = link_publication_date[:7]
+
+            if (citation_link_pub_date >= start_month) and (citation_link_pub_date <= end_month):
+                if (citation_link_pub_date in citationDict):
+                    citationDict[citation_link_pub_date] = citationDict[citation_link_pub_date] + 1
+                else:
+                    citationDict[citation_link_pub_date] = 1
 
         # Formatting the response from ES
         for i in data["aggregations"]["pid_list"]["buckets"]:
@@ -1251,7 +1302,7 @@ class MetricsReader:
                 results["months"].append(months)
                 results["views"].append(0)
                 results["downloads"].append(0)
-                results["citations"][month_index] = citationDict[months]
+                results["citations"].append(citationDict[months])
 
         return results, resultDetails
 
@@ -1410,9 +1461,10 @@ class MetricsReader:
         # Defaulting date to beginnning and end timestamps
         start_date = "01/01/2000"
         end_date = datetime.today().strftime('%m/%d/%Y')
+        aggType = "month"
 
         # update the date range if supplied in the query
-        if (len(self.response["metricsRequest"]["filterBy"]) > 0):
+        if (len(self.response["metricsRequest"]["filterBy"]) > 1):
             if ((self.response["metricsRequest"]["filterBy"][1]["filterType"] == "month" or
                          self.response["metricsRequest"]["filterBy"][1]["filterType"] == "day" or
                          self.response["metricsRequest"]["filterBy"][1]["filterType"] == "year") and
@@ -1420,17 +1472,16 @@ class MetricsReader:
                 start_date = self.response["metricsRequest"]["filterBy"][1]["values"][0]
                 end_date = self.response["metricsRequest"]["filterBy"][1]["values"][1]
 
-                # Get the aggregation Type
-                # default it to months
+        # Get the aggregation Type
+        # default it to months
+        if (len(self.response["metricsRequest"]["groupBy"]) > 0):
+            if "months" in self.response["metricsRequest"]["groupBy"]:
                 aggType = "month"
-                if (len(self.response["metricsRequest"]["groupBy"]) > 0):
-                    if "months" in self.response["metricsRequest"]["groupBy"]:
-                        aggType = "month"
-                    elif "days" in self.response["metricsRequest"]["groupBy"]:
-                        aggType = "day"
-                    elif "years" in self.response["metricsRequest"]["groupBy"]:
-                        aggType = "year"
-                self.logger.debug('aggType: %s', aggType)
+            elif "days" in self.response["metricsRequest"]["groupBy"]:
+                aggType = "day"
+            elif "years" in self.response["metricsRequest"]["groupBy"]:
+                aggType = "year"
+        self.logger.debug('aggType: %s', aggType)
 
         t_portal_dataset_identifier_family = time.time()
 
@@ -1633,6 +1684,8 @@ class MetricsReader:
         # Getting the months between the two given dates:
         start_dt = datetime.strptime(start_date, "%m/%d/%Y")
         end_dt = datetime.strptime(end_date, "%m/%d/%Y")
+        start_month = datetime.strftime(start_dt, "%Y-%m")
+        end_month = datetime.strftime(end_dt, "%Y-%m")
 
         # append totals to resultDetails object
         totalCitations, totalDownloads, totalViews = 0, 0, 0
@@ -1654,16 +1707,16 @@ class MetricsReader:
             totalCitationObjects, citationDetails = self.gatherCitations(citation_pids)
 
             for citationObject in citationDetails:
-                citation_link_pub_date = citationObject["link_publication_date"][:7]
+                link_publication_date = citationObject["link_publication_date"]
 
                 # If citations publish date is not available, assign most recent month to it.
-                if (citation_link_pub_date == None) or (citation_link_pub_date == "NULL"):
+                if (link_publication_date == None) or (link_publication_date == "NULL"):
                     citation_link_pub_date = datetime.strftime(end_dt, "%Y-%m")
+                else:
+                    citation_link_pub_date = link_publication_date[:7]
 
                 # Check if the citations falls within the given time range.
-                citation_pub_date = datetime.strptime(citation_link_pub_date, "%Y-%m")
-
-                if (citation_pub_date > start_dt) and (citation_pub_date < end_dt):
+                if (citation_link_pub_date >= start_month) and (citation_link_pub_date <= end_month):
                     resultDetailsCitationObject.append(citationObject)
                     totalCitations += 1
                     if (citation_link_pub_date in citationDict):
@@ -1697,6 +1750,14 @@ class MetricsReader:
                         records[month][i["key"]["country"]]["views"] = i["unique_doc_count"]["value"]
                     pass
 
+            if includeCitations:
+                for months, totals in citationDict.items():
+                    if months not in records:
+                        records[months] = {}
+                    if "US" not in records[months]:
+                        records[months]["US"] = {}
+                    records[months]["US"]["citations"] = totals
+
             # Parse the dictionary to form the expected output in the form of lists
             for months in records:
                 for country in records[months]:
@@ -1716,8 +1777,8 @@ class MetricsReader:
                             results["views"].append(0)
 
                     if includeCitations:
-                        if (months in citationDict):
-                            results["citations"].append(citationDict[months])
+                        if "citations" in records[months][country]:
+                            results["citations"].append(records[months][country]["citations"])
                         else:
                             results["citations"].append(0)
 
@@ -1780,7 +1841,7 @@ class MetricsReader:
                         if includeViews:
                             results["views"].append(0)
 
-                        results["citations"][month_index] = citationDict[months]
+                        results["citations"].append(citationDict[months])
 
         try:
             if includeCitations:
@@ -1885,7 +1946,7 @@ class MetricsReader:
 
                 # Check if the citations falls within the given time range.
                 citation_pub_date = datetime.strptime(citation_link_pub_date, "%Y-%m-%d")
-                if (citation_pub_date > start_dt) and (citation_pub_date < end_dt):
+                if (citation_pub_date >= start_dt) and (citation_pub_date <= end_dt):
                     resultDetailsCitationObject.append(citationObject)
                     totalCitations += 1
                     if (citation_link_pub_date in citationDict):
@@ -1919,6 +1980,14 @@ class MetricsReader:
                         records[days][i["key"]["country"]]["views"] = i["unique_doc_count"]["value"]
                     pass
 
+            if includeCitations:
+                for days, totals in citationDict.items():
+                    if days not in records:
+                        records[days] = {}
+                    if "US" not in records[days]:
+                        records[days]["US"] = {}
+                    records[days]["US"]["citations"] = totals
+
             # Parse the dictionary to form the expected output in the form of lists
             for days in records:
                 for country in records[days]:
@@ -1938,8 +2007,8 @@ class MetricsReader:
                             results["views"].append(0)
 
                     if includeCitations:
-                        if (days in citationDict):
-                            results["citations"].append(citationDict[days])
+                        if "citations" in records[days][country]:
+                            results["citations"].append(records[days][country]["citations"])
                         else:
                             results["citations"].append(0)
 
@@ -2002,7 +2071,7 @@ class MetricsReader:
                         if includeViews:
                             results["views"].append(0)
 
-                        results["citations"][day_index] = citationDict[days]
+                        results["citations"].append(citationDict[days])
 
         try:
             if includeCitations:
@@ -2079,6 +2148,8 @@ class MetricsReader:
         # Setting the start date and end date provided
         start_dt = datetime.strptime(start_date, "%m/%d/%Y")
         end_dt = datetime.strptime(end_date, "%m/%d/%Y")
+        start_year = datetime.strftime(start_dt, "%Y")
+        end_year = datetime.strftime(end_dt, "%Y")
 
         # append totals to resultDetails object
         totalCitations, totalDownloads, totalViews = 0, 0, 0
@@ -2100,15 +2171,16 @@ class MetricsReader:
             totalCitationObjects, citationDetails = self.gatherCitations(citation_pids)
 
             for citationObject in citationDetails:
-                citation_link_pub_date = citationObject["link_publication_date"][:4]
+                link_publication_date = citationObject["link_publication_date"]
 
                 # If citations publish date is not available, assign most recent years to it.
-                if (citation_link_pub_date == None) or (citation_link_pub_date == "NULL"):
+                if (link_publication_date == None) or (link_publication_date == "NULL"):
                     citation_link_pub_date = datetime.strftime(end_dt, "%Y")
+                else:
+                    citation_link_pub_date = link_publication_date[:4]
 
                 # Check if the citations falls within the given time range.
-                citation_pub_date = datetime.strptime(citation_link_pub_date, "%Y")
-                if (citation_pub_date > start_dt) and (citation_pub_date < end_dt):
+                if (citation_link_pub_date >= start_year) and (citation_link_pub_date <= end_year):
                     resultDetailsCitationObject.append(citationObject)
                     totalCitations += 1
                     if (citation_link_pub_date in citationDict):
@@ -2142,6 +2214,14 @@ class MetricsReader:
                         records[years][i["key"]["country"]]["views"] = i["unique_doc_count"]["value"]
                     pass
 
+            if includeCitations:
+                for years, totals in citationDict.items():
+                    if years not in records:
+                        records[years] = {}
+                    if "US" not in records[years]:
+                        records[years]["US"] = {}
+                    records[years]["US"]["citations"] = totals
+
             # Parse the dictionary to form the expected output in the form of lists
             for years in records:
                 for country in records[years]:
@@ -2161,8 +2241,8 @@ class MetricsReader:
                             results["views"].append(0)
 
                     if includeCitations:
-                        if (years in citationDict):
-                            results["citations"].append(citationDict[years])
+                        if "citations" in records[years][country]:
+                            results["citations"].append(records[years][country]["citations"])
                         else:
                             results["citations"].append(0)
 
@@ -2225,7 +2305,7 @@ class MetricsReader:
                         if includeViews:
                             results["views"].append(0)
 
-                        results["citations"][year_index] = citationDict[years]
+                        results["citations"].append(citationDict[years])
 
         try:
             if includeCitations:
@@ -2266,4 +2346,3 @@ if __name__ == "__main__":
     mr = MetricsReader()
     # mr.resolvePIDs(["doi:10.5065/D6BG2KW9"])
     mr.getDatasetIdentifierFamily("user", "http://orcid.org/0000-0002-0381-3766")
-
