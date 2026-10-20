@@ -707,6 +707,7 @@ class MetricsReader:
         """
         Retrieves the metrics stats per repository
         Uses NodeID as repository ID
+
         :param: NodeId: Repository identifier to look up the metrics in the ES
         :return:
             Formatted Metrics Resonse object in JSON format
@@ -905,7 +906,7 @@ class MetricsReader:
       '''
       term = term.replace('\\', '\\\\')
       for c in SOLR_RESERVED_CHAR_LIST:
-        term = term.replace(c, '\{}'.format(c))
+        term = term.replace(c, '\\{}'.format(c))
       return term
 
 
@@ -913,6 +914,7 @@ class MetricsReader:
         """
             Retrieves the metrics stats per user
             Uses set of dataset identifiers as userID for now
+
             :param: requestPIDArray - set of dataset identifiers that belongs to the user
             :return:
                 Formatted Metrics Resonse object in JSON format
@@ -1041,6 +1043,7 @@ class MetricsReader:
     def formatDataPerUser(self, data, citation_pids, start_date, end_date):
         """
         Formats the results retrieved from the Elastic Search and returns it as a HTTP response
+
         :param data: the data retrieve from ES
         :param citation_pids: PIDS to check the corresponding citations for
         :param start_date: begin date range for the results
@@ -1116,6 +1119,7 @@ class MetricsReader:
         """
             Retrieves the metrics stats per user
             Uses set of dataset identifiers as userID for now
+
             :param: requestPIDArray - set of dataset identifiers that belongs to the user
             :return:
                 Formatted Metrics Resonse object in JSON format
@@ -1236,6 +1240,7 @@ class MetricsReader:
     def formatDataPerGroup(self, data, citation_pids, start_date, end_date):
         """
         Formats the results retrieved from the Elastic Search and returns it as a HTTP response
+
         :param data: the data retrieve from ES
         :param citation_pids: PIDS to check the corresponding citations for
         :param start_date: begin date range for the results
@@ -1437,6 +1442,7 @@ class MetricsReader:
     def getMetricsPerPortal(self, portalLabel, collectionQueryFilterObject=None):
         """
             Handles the Metrics generation for a given indexed portal
+
             :param: portal label
             :returns:
                 Metrics Service response for the Metrics filter type 'portal'
@@ -1621,6 +1627,7 @@ class MetricsReader:
         """
         Formats the ES response to the Metrics Service response
         Checks for groupBy requirements and utilzes appropriate functions.
+
         :param: data - Dictionary object retreieved as a response from ES
         :param: PIDList - List of identifiers associated with this request
         :param: start_date
@@ -1647,6 +1654,7 @@ class MetricsReader:
     def formatElasticSearchResultsByMonth(self, data, PIDList, start_date, end_date, objectType=None, requestMetadata={}):
         """
         Formats the ES response to the Metrics Service response aggregated by month
+
         :param: data - Dictionary object retreieved as a response from ES
         :param: PIDList - List of identifiers associated with this request
         :param: start_date
@@ -1880,6 +1888,7 @@ class MetricsReader:
     def formatElasticSearchResultsByDay(self, data, PIDList, start_date, end_date, objectType=None, requestMetadata={}):
         """
         Formats the ES response to the Metrics Service response aggregated by days
+
         :param: data - Dictionary object retreieved as a response from ES
         :param: PIDList - List of identifiers associated with this request
         :param: start_date
@@ -2111,6 +2120,7 @@ class MetricsReader:
     def formatElasticSearchResultsByYear(self, data, PIDList, start_date, end_date, objectType=None, requestMetadata={}):
         """
         Formats the ES response to the Metrics Service response aggregated by years
+
         :param: data - Dictionary object retreieved as a response from ES
         :param: PIDList - List of identifiers associated with this request
         :param: start_date

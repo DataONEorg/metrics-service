@@ -15,10 +15,6 @@ Metrics Service Implementation
    :members:
    :undoc-members:
 
-.. automodule:: d1_metrics.daemon
-   :members:
-   :undoc-members:
-
 .. automodule:: d1_metrics.solrclient
    :members:
    :undoc-members:

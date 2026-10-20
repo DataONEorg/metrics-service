@@ -68,7 +68,7 @@ SOLR_RESERVED_CHAR_LIST = [
 def escapeSolrQueryTerm(term):
   term = term.replace('\\', '\\\\')
   for c in SOLR_RESERVED_CHAR_LIST:
-    term = term.replace(c, '\{}'.format(c))
+    term = term.replace(c, '\\{}'.format(c))
   return term
 
 

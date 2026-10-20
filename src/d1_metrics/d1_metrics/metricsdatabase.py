@@ -506,8 +506,8 @@ class MetricsDatabase(object):
         if cn_url is None:
             cn_url = CN_URL
         cd = solrclient.SolrClient(cn_url, 'solr')
-        data = cd.getFieldValues('id', q='id:/.*doi.*{1,5}10\.[0-9]{4,6}.*/')
-        seriesIdData = cd.getFieldValues('seriesId', q='seriesId:/.*doi.*{1,5}10\.[0-9]{4,6}.*/')
+        data = cd.getFieldValues('id', q=r'id:/.*doi.*{1,5}10\.[0-9]{4,6}.*/')
+        seriesIdData = cd.getFieldValues('seriesId', q=r'seriesId:/.*doi.*{1,5}10\.[0-9]{4,6}.*/')
         prefixes = []
         doi = []
         count = 0
@@ -1257,7 +1257,7 @@ class MetricsDatabase(object):
     def escapeSolrQueryTerm(self, term):
         term = term.replace('\\', '\\\\')
         for c in SOLR_RESERVED_CHAR_LIST:
-            term = term.replace(c, '\{}'.format(c))
+            term = term.replace(c, '\\{}'.format(c))
         return term
 
 
