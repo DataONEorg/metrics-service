@@ -369,7 +369,7 @@ class MetricsElasticSearch(object):
       q = {
         "query_string": {
           "default_field": "message",
-          "query": "\/cn\/v2\/query\/solr\/",
+          "query": r"\/cn\/v2\/query\/solr\/",
         }
       }
     search_body["query"]["bool"]["must"].append( q )
@@ -443,7 +443,7 @@ class MetricsElasticSearch(object):
       q = {
         "query_string": {
           "default_field": "message",
-          "query": "\/cn\/v2\/query\/solr\/",
+          "query": r"\/cn\/v2\/query\/solr\/",
         }
       }
     else:
@@ -760,11 +760,13 @@ class MetricsElasticSearch(object):
       mark: datetime to match for live sessions.
 
     Returns:
-      {ip: {
-        timestamp: timestamp of oldest event in session,
-        sessionId: session
+      dict keyed by IP address::
+
+        {ip: {
+          timestamp: timestamp of oldest event in session,
+          sessionId: session
+          }
         }
-      }
     '''
     live_sessions = {}
     if index_name is None:

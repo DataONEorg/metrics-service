@@ -227,7 +227,7 @@ class CitationsManager:
                     try:
                         metrics_database = MetricsDatabase()
                         metrics_database.connect()
-                        doi_pattern = "^\s*(http:\/\/|https:\/\/)?(doi.org\/|dx.doi.org\/)?(doi: ?|DOI: ?)?(10\.\d{4,}(\.\d)*)\/(\w+).*$"
+                        doi_pattern = r"^\s*(http:\/\/|https:\/\/)?(doi.org\/|dx.doi.org\/)?(doi: ?|DOI: ?)?(10\.\d{4,}(\.\d)*)\/(\w+).*$"
                         doi_metadata = {}
                         if (re.match(doi_pattern, source_id)):
                             source_doi_index = source_id.index("10.")

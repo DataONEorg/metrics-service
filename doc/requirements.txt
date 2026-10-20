@@ -1,1 +1,5 @@
+sphinx
+sphinx-autobuild
 plantweb
+pygments
+sphinx-rtd-theme

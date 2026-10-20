@@ -30,7 +30,7 @@ SOLR_RESERVED_CHAR_LIST = [
 def escapeSolrQueryTerm(term):
   term = term.replace('\\', '\\\\')
   for c in SOLR_RESERVED_CHAR_LIST:
-    term = term.replace(c, '\{}'.format(c))
+    term = term.replace(c, '\\{}'.format(c))
   return term
 
 
@@ -76,6 +76,7 @@ class SolrClient(object):
                       sort=True,
                       **query_args):
     """Retrieve the unique values for a field, along with their usage counts.
+
     :param sort: Sort the result
     :param name: Name of field for which to retrieve values
     :type name: string

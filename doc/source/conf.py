@@ -43,16 +43,10 @@ release = '0.0.2'
 extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.intersphinx',
-    'sphinx.ext.todo',
-    'sphinx.ext.mathjax',
-    'sphinx.ext.ifconfig',
+    'sphinx.ext.napoleon',
     'sphinx.ext.viewcode',
-    'sphinx.ext.githubpages',
     'plantweb.directive',      #for support of plantuml diagrams
 ]
-
-# Add any paths that contain templates here, relative to this directory.
-templates_path = ['_templates']
 
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
@@ -68,7 +62,7 @@ master_doc = 'index'
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = 'en'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -92,10 +86,6 @@ html_theme = 'sphinx_rtd_theme'
 #
 # html_theme_options = {}
 
-# Add any paths that contain custom static files (such as style sheets) here,
-# relative to this directory. They are copied after the builtin static files,
-# so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['_static']
 
 # Custom sidebar templates, must be a dictionary that maps document names
 # to template names.
@@ -189,9 +179,11 @@ epub_exclude_files = ['search.html']
 # -- Options for intersphinx extension ---------------------------------------
 
 # Example configuration for intersphinx: refer to the Python standard library.
-intersphinx_mapping = {'https://docs.python.org/': None}
+intersphinx_mapping = {'python': ('https://docs.python.org/3', None)}
 
-# -- Options for todo extension ----------------------------------------------
+# -- Options for autodoc extension -------------------------------------------
 
-# If true, `todo` and `todoList` produce output, else they produce nothing.
-todo_include_todos = True
+# Runtime dependencies of the documented packages that aren't needed to build
+# the docs; mock them so autodoc can import the modules.
+autodoc_mock_imports = ['aiohttp', 'dateparser', 'dateutil', 'elasticsearch',
+                        'falcon', 'psycopg2', 'pytz', 'requests', 'schedule']
