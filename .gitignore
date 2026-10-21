@@ -139,3 +139,7 @@ ENV/
 
 src/d1_metrics/reports/
 src/d1_metrics/ingest_citations/*
+
+# temp Quarto files
+**/.quarto/
+**/*.quarto_ipynb
